@@ -1,0 +1,185 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 20px 44px;
+}
+
+header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+
+h1 {
+  margin: 4px 0 0;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.eyebrow,
+.source,
+.status,
+.option {
+  color: color-mix(in srgb, CanvasText 68%, Canvas);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.eyebrow {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.source {
+  max-width: 360px;
+  margin: 4px 0 0;
+  text-align: right;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+button {
+  border: 1px solid color-mix(in srgb, CanvasText 24%, Canvas);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: CanvasText;
+  color: Canvas;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+button.secondary {
+  background: Canvas;
+  color: CanvasText;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.status {
+  min-height: 22px;
+  margin: 0 0 16px;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.summary span {
+  border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.queue {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queue li {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, Canvas);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.url,
+.meta {
+  overflow: hidden;
+  color: color-mix(in srgb, CanvasText 62%, Canvas);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-pill {
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, CanvasText 10%, Canvas);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.succeeded .status-pill {
+  background: #167c3b;
+  color: #fff;
+}
+
+.failed .status-pill {
+  background: #b3261e;
+  color: #fff;
+}
+
+.running .status-pill {
+  background: #0b57d0;
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  header,
+  .controls,
+  .summary,
+  .queue li {
+    grid-template-columns: 1fr;
+  }
+
+  header {
+    display: block;
+  }
+
+  .source {
+    max-width: none;
+    text-align: left;
+  }
+}

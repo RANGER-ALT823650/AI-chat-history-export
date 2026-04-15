@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Chat Batch Exporter</title>
+    <link rel="stylesheet" href="./batch.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">AI Chat Exporter</p>
+          <h1>批量导出账号历史</h1>
+        </div>
+        <p id="source" class="source">正在读取来源标签页...</p>
+      </header>
+
+      <section class="controls" aria-label="批量导出控制">
+        <button id="discoverButton" type="button">扫描历史列表</button>
+        <button id="exportButton" type="button" disabled>开始导出</button>
+        <button id="cancelButton" class="secondary" type="button" disabled>取消</button>
+        <button id="clearButton" class="secondary" type="button">清空本次队列</button>
+        <button id="clearRegistryButton" class="secondary" type="button">清空备份记录</button>
+      </section>
+
+      <label class="option">
+        <input id="skipSucceeded" type="checkbox" checked>
+        跳过已备份或已成功导出的聊天
+      </label>
+
+      <p id="status" class="status" role="status">先在 ChatGPT、Claude、Gemini 或 Grok 页面打开本控制台，然后扫描历史列表。长期备份记录会跨标签页保留。</p>
+
+      <section class="summary" aria-label="导出统计">
+        <span id="totalCount">总数 0</span>
+        <span id="queuedCount">待导出 0</span>
+        <span id="successCount">成功 0</span>
+        <span id="failedCount">失败 0</span>
+        <span id="registryCount">备份记录 0</span>
+      </section>
+
+      <ol id="queue" class="queue" aria-label="聊天导出队列"></ol>
+    </main>
+
+    <script src="./batch.js"></script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Chat Exporter</title>
+    <link rel="stylesheet" href="./popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>AI Chat Exporter</h1>
+      <p id="platform" class="muted">正在检测当前页面...</p>
+      <button id="exportButton" type="button">导出当前聊天为 Markdown</button>
+      <button id="batchButton" class="secondary" type="button">批量导出账号历史</button>
+      <button id="debugButton" class="secondary" type="button">下载页面调试快照</button>
+      <p id="status" class="status" role="status"></p>
+    </main>
+    <script src="./popup.js"></script>
+  </body>
+</html>

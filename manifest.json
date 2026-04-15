@@ -1,0 +1,75 @@
+{
+  "manifest_version": 3,
+  "name": "AI Chat Markdown Exporter",
+  "description": "Export the current ChatGPT, Claude, Gemini, or Grok conversation as RAG-friendly Markdown.",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "Export AI chat",
+    "default_popup": "src/popup/popup.html"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://grok.com/*",
+    "https://*.grok.com/*",
+    "https://x.com/i/grok*",
+    "https://grok.x.ai/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://*.grok.com/*",
+        "https://x.com/i/grok*",
+        "https://grok.x.ai/*"
+      ],
+      "js": [
+        "src/content/api-interceptor.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://*.grok.com/*",
+        "https://x.com/i/grok*",
+        "https://grok.x.ai/*"
+      ],
+      "js": [
+        "src/content/platform-utils.js",
+        "src/content/timestamp-cache.js",
+        "src/content/structured-cache.js",
+        "src/content/markdown.js",
+        "src/content/adapters/common.js",
+        "src/content/adapters/chatgpt.js",
+        "src/content/adapters/gemini.js",
+        "src/content/adapters/grok.js",
+        "src/content/adapters/claude.js",
+        "src/content/history-discovery.js",
+        "src/content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
