@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Chat Markdown Exporter",
-  "description": "Export the current ChatGPT, Claude, Gemini, or Grok conversation as RAG-friendly Markdown.",
+  "description": "Export the current ChatGPT, Claude, Gemini, Grok, DeepSeek, or Doubao conversation as RAG-friendly Markdown.",
   "version": "0.1.0",
   "action": {
     "default_title": "Export AI chat",
@@ -25,7 +25,12 @@
     "https://grok.com/*",
     "https://*.grok.com/*",
     "https://x.com/i/grok*",
-    "https://grok.x.ai/*"
+    "https://grok.x.ai/*",
+    "https://chat.deepseek.com/*",
+    "https://deepseek.com/*",
+    "https://*.deepseek.com/*",
+    "https://doubao.com/*",
+    "https://*.doubao.com/*"
   ],
   "content_scripts": [
     {
@@ -37,7 +42,12 @@
         "https://grok.com/*",
         "https://*.grok.com/*",
         "https://x.com/i/grok*",
-        "https://grok.x.ai/*"
+        "https://grok.x.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://deepseek.com/*",
+        "https://*.deepseek.com/*",
+        "https://doubao.com/*",
+        "https://*.doubao.com/*"
       ],
       "js": [
         "src/content/api-interceptor.js"
@@ -54,7 +64,12 @@
         "https://grok.com/*",
         "https://*.grok.com/*",
         "https://x.com/i/grok*",
-        "https://grok.x.ai/*"
+        "https://grok.x.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://deepseek.com/*",
+        "https://*.deepseek.com/*",
+        "https://doubao.com/*",
+        "https://*.doubao.com/*"
       ],
       "js": [
         "src/content/platform-utils.js",
@@ -65,6 +80,8 @@
         "src/content/adapters/chatgpt.js",
         "src/content/adapters/gemini.js",
         "src/content/adapters/grok.js",
+        "src/content/adapters/deepseek.js",
+        "src/content/adapters/doubao.js",
         "src/content/adapters/claude.js",
         "src/content/history-discovery.js",
         "src/content/content.js"

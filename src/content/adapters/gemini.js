@@ -8,9 +8,11 @@
     extract() {
       return common.extractWithConfig({
         platformLabel: "Gemini",
-        visibleHistoryConversationTimeOnly: true,
+        preferVisibleHistoryConversationTime: true,
         disableMessageTimeExtraction: true,
-        disableStructuredTimes: true,
+        allowMessageTimes: false,
+        allowDocumentTime: false,
+        allowScriptTime: false,
         rootSelector: "main",
         titleSelectors: [
           "[data-test-id='conversation-title']",

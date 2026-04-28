@@ -4,12 +4,16 @@
   var namespace = (global.AIChatExporter = global.AIChatExporter || {});
 
   var MESSAGE_TYPE = "AI_CHAT_EXPORTER_TIMESTAMP";
+  var GEMINI_DEBUG_MESSAGE_TYPE = "AI_CHAT_EXPORTER_GEMINI_DEBUG";
   var CACHE_STORAGE_KEY = "aiChatExporterTimestampCache";
+  var GEMINI_DEBUG_STORAGE_KEY = "aiChatExporterGeminiDebugEvidence";
   var MAX_CACHE_SIZE = 2000;
+  var MAX_GEMINI_DEBUG_ENTRIES = 200;
   var CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
   // In-memory cache: conversationId → { timestamp, updatedAt, title, platform, cachedAt }
   var memoryCache = {};
+  var geminiDebugEvidence = [];
 
   // ---------------------------------------------------------------------------
   // Persistence via chrome.storage.local
@@ -33,6 +37,17 @@
                 memoryCache[keys[i]] = entry;
               }
             }
+          }
+        });
+
+        chrome.storage.local.get(GEMINI_DEBUG_STORAGE_KEY, function (result) {
+          if (chrome.runtime.lastError) {
+            return;
+          }
+
+          var stored = result && result[GEMINI_DEBUG_STORAGE_KEY];
+          if (Array.isArray(stored)) {
+            geminiDebugEvidence = stored.slice(-MAX_GEMINI_DEBUG_ENTRIES);
           }
         });
       }
@@ -67,8 +82,21 @@
     }
   }
 
+  function saveGeminiDebugEvidenceToStorage() {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        var obj = {};
+        obj[GEMINI_DEBUG_STORAGE_KEY] = geminiDebugEvidence.slice(-MAX_GEMINI_DEBUG_ENTRIES);
+        chrome.storage.local.set(obj);
+      }
+    } catch (_e) {
+      // Storage access error, ignore
+    }
+  }
+
   // Debounce save to avoid hammering storage
   var saveTimer = null;
+  var geminiDebugSaveTimer = null;
 
   function scheduleSave() {
     if (saveTimer) {
@@ -78,6 +106,16 @@
       saveTimer = null;
       saveCacheToStorage();
     }, 2000);
+  }
+
+  function scheduleGeminiDebugSave() {
+    if (geminiDebugSaveTimer) {
+      return;
+    }
+    geminiDebugSaveTimer = setTimeout(function () {
+      geminiDebugSaveTimer = null;
+      saveGeminiDebugEvidenceToStorage();
+    }, 1000);
   }
 
   // ---------------------------------------------------------------------------
@@ -92,12 +130,14 @@
     var existing = memoryCache[conversationId];
     // Prefer earlier (creation) timestamps, but update title/updatedAt
     if (existing && existing.timestamp && existing.timestamp <= timestamp) {
+      existing.cachedAt = Date.now();
       if (extra && extra.title && !existing.title) {
         existing.title = extra.title;
       }
       if (extra && extra.updatedAt) {
         existing.updatedAt = extra.updatedAt;
       }
+      scheduleSave();
       return;
     }
 
@@ -129,20 +169,77 @@
     return memoryCache;
   }
 
+  function cacheGeminiDebugEvidence(evidence) {
+    if (!evidence || evidence.platform !== "Gemini" || !Array.isArray(evidence.ids) || !evidence.ids.length) {
+      return;
+    }
+
+    geminiDebugEvidence.push({
+      capturedAt: String(evidence.capturedAt || new Date().toISOString()),
+      source: String(evidence.source || ""),
+      rpcid: String(evidence.rpcid || ""),
+      url: String(evidence.url || ""),
+      responseLength: Number(evidence.responseLength || 0),
+      timestampCandidateCount: Number(evidence.timestampCandidateCount || 0),
+      ids: evidence.ids.slice(0, 40).map(function (item) {
+        return {
+          conversationId: String(item.conversationId || ""),
+          hitCount: Number(item.hitCount || 0),
+          timestampCandidates: Array.isArray(item.timestampCandidates)
+            ? item.timestampCandidates.slice(0, 12).map(function (candidate) {
+              return {
+                timestamp: String(candidate.timestamp || ""),
+                shape: String(candidate.shape || ""),
+                distanceFromConversationIdChars: Number(candidate.distanceFromConversationIdChars || 0)
+              };
+            })
+            : []
+        };
+      }).filter(function (item) {
+        return item.conversationId;
+      })
+    });
+
+    if (geminiDebugEvidence.length > MAX_GEMINI_DEBUG_ENTRIES) {
+      geminiDebugEvidence.splice(0, geminiDebugEvidence.length - MAX_GEMINI_DEBUG_ENTRIES);
+    }
+
+    scheduleGeminiDebugSave();
+  }
+
+  function getGeminiDebugEvidence(conversationId) {
+    if (!conversationId) {
+      return geminiDebugEvidence.slice();
+    }
+
+    return geminiDebugEvidence.filter(function (entry) {
+      return entry.ids.some(function (item) {
+        return item.conversationId === conversationId;
+      });
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Listen for messages from the MAIN world interceptor
   // ---------------------------------------------------------------------------
 
   function handleMessage(event) {
-    if (!event || !event.data || event.data.type !== MESSAGE_TYPE) {
+    if (!event || !event.data) {
       return;
     }
 
     var data = event.data;
-    cacheTimestamp(data.conversationId, data.timestamp, data.platform, {
-      title: data.title || "",
-      updatedAt: data.updatedAt || ""
-    });
+    if (data.type === MESSAGE_TYPE) {
+      cacheTimestamp(data.conversationId, data.timestamp, data.platform, {
+        title: data.title || "",
+        updatedAt: data.updatedAt || ""
+      });
+      return;
+    }
+
+    if (data.type === GEMINI_DEBUG_MESSAGE_TYPE) {
+      cacheGeminiDebugEvidence(data.evidence);
+    }
   }
 
   global.addEventListener("message", handleMessage);
@@ -156,6 +253,7 @@
 
   namespace.TimestampCache = {
     cacheTimestamp: cacheTimestamp,
+    getGeminiDebugEvidence: getGeminiDebugEvidence,
     getTimestamp: getTimestamp,
     getCacheEntry: getCacheEntry,
     getAllEntries: getAllEntries

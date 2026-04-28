@@ -7,7 +7,9 @@
     chatgpt: "ChatGPT",
     claude: "Claude",
     gemini: "Gemini",
-    grok: "Grok"
+    grok: "Grok",
+    deepseek: "DeepSeek",
+    doubao: "Doubao"
   };
 
   function normalizeWhitespace(value) {
@@ -53,6 +55,14 @@
       return { id: "grok", label: PLATFORM_LABELS.grok };
     }
 
+    if (hostname === "chat.deepseek.com" || hostname === "deepseek.com" || hostname.endsWith(".deepseek.com")) {
+      return { id: "deepseek", label: PLATFORM_LABELS.deepseek };
+    }
+
+    if (hostname === "doubao.com" || hostname.endsWith(".doubao.com")) {
+      return { id: "doubao", label: PLATFORM_LABELS.doubao };
+    }
+
     return null;
   }
 
@@ -62,7 +72,7 @@
       return "";
     }
 
-    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "Google Gemini"];
+    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "豆包", "Google Gemini"];
     for (const label of labels) {
       clean = clean
         .replace(new RegExp(`\\s*[|-]\\s*${escapeRegExp(label)}\\s*$`, "i"), "")
@@ -70,6 +80,44 @@
     }
 
     return normalizeWhitespace(clean);
+  }
+
+  function isGenericConversationTitle(title, platformLabel = "") {
+    const clean = normalizeWhitespace(title)
+      .replace(/[_-]+/g, " ")
+      .replace(/[「」"“”]/g, "")
+      .trim();
+    if (!clean) {
+      return true;
+    }
+
+    const stripped = stripPlatformFromTitle(clean, platformLabel);
+    const normalized = normalizeWhitespace(stripped || clean).toLowerCase();
+    const compact = normalized.replace(/\s+/g, "");
+    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "豆包", "Google Gemini"]
+      .map((label) => normalizeWhitespace(label).toLowerCase())
+      .filter(Boolean);
+
+    if (labels.includes(normalized) || labels.map((label) => label.replace(/\s+/g, "")).includes(compact)) {
+      return true;
+    }
+
+    return [
+      /^ai chat$/i,
+      /^chat$/i,
+      /^conversation$/i,
+      /^new chat$/i,
+      /^new conversation$/i,
+      /^untitled(?: chat| conversation)?$/i,
+      /^chat history$/i,
+      /^conversation history$/i,
+      /^recent(?: chats| conversations)?$/i,
+      /^与\s*(?:google\s*)?gemini\s*对话$/i,
+      /^和\s*(?:google\s*)?gemini\s*聊天$/i,
+      /^新(建)?(聊天|对话)$/,
+      /^未命名(聊天|对话)?$/,
+      /^无标题(聊天|对话)?$/
+    ].some((pattern) => pattern.test(stripped || clean));
   }
 
   function escapeRegExp(value) {
@@ -122,6 +170,7 @@
     detectPlatformFromUrl,
     firstMeaningfulLine,
     formatDateForFilename,
+    isGenericConversationTitle,
     makeSlug,
     normalizeWhitespace,
     stripPlatformFromTitle,

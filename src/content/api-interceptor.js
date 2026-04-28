@@ -8,6 +8,7 @@
 
   var MESSAGE_TYPE = "AI_CHAT_EXPORTER_TIMESTAMP";
   var STRUCTURED_MESSAGE_TYPE = "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION";
+  var GEMINI_DEBUG_MESSAGE_TYPE = "AI_CHAT_EXPORTER_GEMINI_DEBUG";
   var replayQueue = [];
   var replayTimer = null;
 
@@ -81,6 +82,17 @@
     postMessageWithReplay({
       type: STRUCTURED_MESSAGE_TYPE,
       conversation: conversation
+    });
+  }
+
+  function postGeminiDebugEvidence(evidence) {
+    if (!evidence || !evidence.ids || !evidence.ids.length) {
+      return;
+    }
+
+    postMessageWithReplay({
+      type: GEMINI_DEBUG_MESSAGE_TYPE,
+      evidence: evidence
     });
   }
 
@@ -173,7 +185,7 @@
     if (/user|human|you|client|customer|prompt/.test(text)) {
       return "user";
     }
-    if (/assistant|model|bot|claude|gemini|grok|chatgpt|ai/.test(text)) {
+    if (/assistant|model|bot|claude|gemini|grok|deepseek|doubao|chatgpt|ai/.test(text)) {
       return "assistant";
     }
     if (/system/.test(text)) {
@@ -198,6 +210,22 @@
     return "";
   }
 
+  function isReasoningContentObject(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+
+    var marker = [
+      firstValue(value, ["type", "content_type", "contentType", "kind", "name", "category"]),
+      firstValue(value, ["title", "label", "display_name", "displayName"])
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    return (
+      /(?:^|[\s_-])(?:think|thinking|reasoning|cot|chain-of-thought|chain_of_thought)(?:[\s_-]|$)/.test(marker) ||
+      /模型思考|思考过程|深度思考/.test(marker)
+    );
+  }
+
   function textFromContent(value, depth) {
     if (value === undefined || value === null || depth > 8) {
       return "";
@@ -219,6 +247,10 @@
       return "";
     }
 
+    if (isReasoningContentObject(value)) {
+      return "";
+    }
+
     if (value.content && value.content.parts) {
       return textFromContent(value.content.parts, depth + 1);
     }
@@ -236,7 +268,19 @@
       "value",
       "response",
       "prompt",
-      "answer"
+      "answer",
+      "fragments",
+      "parts",
+      "content_block",
+      "contentBlock",
+      "content_blocks",
+      "contentBlocks",
+      "content_blocks_v2",
+      "contentBlocksV2",
+      "content_obj",
+      "contentObj",
+      "text_block",
+      "textBlock"
     ]);
 
     if (direct !== "") {
@@ -352,6 +396,69 @@
     return hasUser && hasAssistant;
   }
 
+  function firstMessageTime(messages) {
+    return (messages || []).map(function (message) { return message.time; }).find(Boolean) || "";
+  }
+
+  function earliestMessageTime(messages) {
+    return (messages || [])
+      .map(function (message) { return message && message.time; })
+      .filter(Boolean)
+      .sort()[0] || "";
+  }
+
+  function timeFromKeys(obj, keys) {
+    return validTimestamp(firstValue(obj, keys));
+  }
+
+  function parseJsonString(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    var text = value.trim();
+    if (!/^[\[{]/.test(text)) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function textFromContentValue(value, depth) {
+    if (typeof value === "string") {
+      var parsed = parseJsonString(value);
+      if (parsed !== null) {
+        return textFromContentValue(parsed, depth + 1);
+      }
+    }
+
+    return textFromContent(value, depth);
+  }
+
+  function contentFromKeys(obj, keys) {
+    if (!obj || typeof obj !== "object") {
+      return "";
+    }
+
+    for (var i = 0; i < keys.length; i++) {
+      var value = obj[keys[i]];
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      var text = textFromContentValue(value, 0);
+      if (text) {
+        return text;
+      }
+    }
+
+    return "";
+  }
+
   function scanStructuredConversations(value, platform, inherited, depth) {
     if (!value || typeof value !== "object" || depth > 12) {
       return;
@@ -364,11 +471,14 @@
 
       var messages = value.map(normalizeMessageObject).filter(Boolean);
       if (messages.length >= 2 && roleDiversity(messages) && inherited && inherited.conversationId) {
+        var messageConversationTime = firstMessageTime(messages);
         postStructuredConversation({
           platform: platform,
           conversationId: inherited.conversationId,
           title: inherited.title || "",
-          conversationTime: inherited.conversationTime || (messages.find(function (message) { return message.time; }) || {}).time || "",
+          conversationTime: platform === "Doubao"
+            ? messageConversationTime
+            : (inherited.conversationTime || messageConversationTime || ""),
           messages: messages
         });
       }
@@ -382,8 +492,16 @@
     var context = {
       conversationId: candidateConversationId(value) || (inherited && inherited.conversationId) || "",
       title: candidateTitle(value) || (inherited && inherited.title) || "",
-      conversationTime: candidateConversationTime(value) || (inherited && inherited.conversationTime) || ""
+      conversationTime: platform === "Doubao"
+        ? ((inherited && inherited.conversationTime) || "")
+        : (candidateConversationTime(value) || (inherited && inherited.conversationTime) || "")
     };
+
+    if (platform !== "Doubao" && context.conversationId && context.conversationTime) {
+      postTimestamp(context.conversationId, context.conversationTime, platform, {
+        title: context.title
+      });
+    }
 
     var keys = Object.keys(value);
     for (var j = 0; j < keys.length; j++) {
@@ -459,6 +577,12 @@
     }
     if (/grok\.com|grok\.x\.ai|x\.com\/i\/grok/i.test(url)) {
       return "grok";
+    }
+    if (/deepseek\.com/i.test(url)) {
+      return "deepseek";
+    }
+    if (/doubao\.com/i.test(url)) {
+      return "doubao";
     }
     return "";
   }
@@ -563,9 +687,570 @@
            /\/c\/[a-f0-9-]{30,}/i.test(url);
   }
 
-  function parseGrokResponse(data) {
-    scanStructuredConversations(data, "Grok", {}, 0);
-    extractFromObject(data, "Grok");
+  var GROK_CREATE_TIME_KEYS = [
+    "createTime",
+    "createdAt",
+    "created_at",
+    "create_time",
+    "insertedAt",
+    "inserted_at",
+    "conversationTime",
+    "conversation_time",
+    "timestamp",
+    "time",
+    "date"
+  ];
+  var GROK_CONTENT_KEYS = [
+    "message",
+    "text",
+    "markdown",
+    "content",
+    "body",
+    "value",
+    "response",
+    "prompt",
+    "answer",
+    "parts",
+    "fragments",
+    "content_block",
+    "contentBlock"
+  ];
+
+  function grokConversationIdFromUrl(sourceUrl) {
+    try {
+      var currentUrl = (window.location && window.location.href) || "https://grok.com/";
+      var url = new URL(sourceUrl || currentUrl, currentUrl);
+      var match = url.pathname.match(/\/(?:c|chat)\/([A-Za-z0-9-]{8,})/i) ||
+        url.pathname.match(/\/rest\/app-chat\/conversations\/([A-Za-z0-9-]{8,})/i);
+      return match ? match[1] : "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function grokConversationId(obj) {
+    var value = firstValue(obj, [
+      "conversationId",
+      "conversation_id",
+      "chatId",
+      "chat_id",
+      "threadId",
+      "thread_id",
+      "id"
+    ]);
+
+    return typeof value === "string" || typeof value === "number" ? String(value) : "";
+  }
+
+  function grokRole(value) {
+    var text = String(value || "").toLowerCase();
+    if (/^(human|user|client|customer|prompt)$/.test(text)) {
+      return "user";
+    }
+    if (/^(assistant|model|bot|grok|ai)$/.test(text)) {
+      return "assistant";
+    }
+    if (/^system$/.test(text)) {
+      return "system";
+    }
+
+    return normalizedRole(value);
+  }
+
+  function grokCreateTime(obj) {
+    return timeFromKeys(obj, GROK_CREATE_TIME_KEYS);
+  }
+
+  function normalizeGrokMessage(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      return null;
+    }
+
+    var role = grokRole(firstValue(obj, [
+      "sender",
+      "role",
+      "author",
+      "from",
+      "creator",
+      "type"
+    ]));
+    var content = contentFromKeys(obj, GROK_CONTENT_KEYS);
+
+    if (!role || !content) {
+      return null;
+    }
+
+    return {
+      role: role,
+      content: content,
+      markdown: content,
+      time: grokCreateTime(obj)
+    };
+  }
+
+  function scanGrokConversations(value, inherited, depth) {
+    if (!value || typeof value !== "object" || depth > 12) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length > 1000) {
+        return;
+      }
+
+      var messages = value.map(normalizeGrokMessage).filter(Boolean);
+      if (messages.length >= 2 && roleDiversity(messages)) {
+        var conversationId = (inherited && inherited.conversationId) || "";
+        if (!conversationId) {
+          conversationId = value.map(grokConversationId).find(Boolean) || "";
+        }
+
+        if (conversationId) {
+          var conversationTime = (inherited && inherited.conversationTime) || earliestMessageTime(messages) || "";
+          if (conversationTime) {
+            postTimestamp(conversationId, conversationTime, "Grok", {
+              title: (inherited && inherited.title) || ""
+            });
+          }
+          postStructuredConversation({
+            platform: "Grok",
+            conversationId: conversationId,
+            title: (inherited && inherited.title) || "",
+            conversationTime: conversationTime,
+            messages: messages
+          });
+        }
+      }
+
+      for (var i = 0; i < value.length; i++) {
+        scanGrokConversations(value[i], inherited, depth + 1);
+      }
+      return;
+    }
+
+    var context = {
+      conversationId: grokConversationId(value) || (inherited && inherited.conversationId) || "",
+      title: candidateTitle(value) || (inherited && inherited.title) || "",
+      conversationTime: grokCreateTime(value) || (inherited && inherited.conversationTime) || ""
+    };
+
+    if (context.conversationId && context.conversationTime) {
+      postTimestamp(context.conversationId, context.conversationTime, "Grok", {
+        title: context.title
+      });
+    }
+
+    var keys = Object.keys(value);
+    for (var j = 0; j < keys.length; j++) {
+      var child = value[keys[j]];
+      if (child && typeof child === "object") {
+        scanGrokConversations(child, context, depth + 1);
+      }
+    }
+  }
+
+  function parseGrokResponse(data, sourceUrl) {
+    scanGrokConversations(data, {
+      conversationId: grokConversationIdFromUrl(sourceUrl || ((window.location && window.location.href) || ""))
+    }, 0);
+  }
+
+  function isGenericConversationEndpoint(url) {
+    return /\/(api|rest|web-api|samantha|alice|bot|conversation|chat|im|agent)\//i.test(url) &&
+           /(conversation|conversation_id|conversationId|chat|history|message|thread|session|chain|samantha|alice|bot)/i.test(url);
+  }
+
+  function parseGenericConversationResponse(data, platformLabel) {
+    scanStructuredConversations(data, platformLabel, {}, 0);
+    if (platformLabel !== "Doubao") {
+      extractFromObject(data, platformLabel);
+    }
+  }
+
+  // DeepSeek: current conversation payloads arrive from
+  // /api/v0/chat/history_messages with data.biz_data.chat_session and
+  // data.biz_data.chat_messages. Only inserted/created message times are
+  // accepted here; updated_at is a list-sort time, not the chat start time.
+  var MESSAGE_CREATE_TIME_KEYS = [
+    "inserted_at",
+    "insertedAt",
+    "created_at",
+    "createdAt",
+    "create_time",
+    "createTime",
+    "server_create_time",
+    "serverCreateTime",
+    "create_timestamp",
+    "createTimestamp",
+    "timestamp",
+    "time",
+    "date"
+  ];
+  var CONVERSATION_CREATE_TIME_KEYS = [
+    "created_at",
+    "createdAt",
+    "create_time",
+    "createTime",
+    "inserted_at",
+    "insertedAt",
+    "conversation_time",
+    "conversationTime",
+    "date_created",
+    "dateCreated",
+    "creation_time",
+    "creationTime",
+    "born_at",
+    "bornAt"
+  ];
+  var STRUCTURED_CONTENT_KEYS = [
+    "content",
+    "text",
+    "markdown",
+    "body",
+    "message",
+    "value",
+    "response",
+    "prompt",
+    "answer",
+    "fragments",
+    "parts",
+    "content_block",
+    "contentBlock",
+    "content_blocks",
+    "contentBlocks",
+    "content_blocks_v2",
+    "contentBlocksV2",
+    "content_obj",
+    "contentObj",
+    "text_block",
+    "textBlock",
+    "data"
+  ];
+
+  function deepSeekConversationTime(obj) {
+    return timeFromKeys(obj, CONVERSATION_CREATE_TIME_KEYS);
+  }
+
+  function deepSeekMessageTime(obj) {
+    return timeFromKeys(obj, MESSAGE_CREATE_TIME_KEYS);
+  }
+
+  function normalizeDeepSeekMessage(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      return null;
+    }
+
+    var role = normalizedRole(firstValue(obj, [
+      "role",
+      "sender",
+      "sender_type",
+      "senderType",
+      "from",
+      "author",
+      "type",
+      "creator"
+    ]));
+    var content = contentFromKeys(obj, STRUCTURED_CONTENT_KEYS);
+
+    if (!role || !content) {
+      return null;
+    }
+
+    return {
+      role: role,
+      content: content,
+      markdown: content,
+      time: deepSeekMessageTime(obj)
+    };
+  }
+
+  function scanDeepSeekConversations(value, inherited, depth) {
+    if (!value || typeof value !== "object" || depth > 12) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length > 1000) {
+        return;
+      }
+
+      var messages = value.map(normalizeDeepSeekMessage).filter(Boolean);
+      if (messages.length >= 2 && roleDiversity(messages)) {
+        var conversationId = (inherited && inherited.conversationId) || "";
+        if (!conversationId) {
+          conversationId = value.map(candidateConversationId).find(Boolean) || "";
+        }
+
+        if (conversationId) {
+          var conversationTime = (inherited && inherited.conversationTime) || earliestMessageTime(messages) || "";
+          if (conversationTime) {
+            postTimestamp(conversationId, conversationTime, "DeepSeek", {
+              title: (inherited && inherited.title) || ""
+            });
+          }
+          postStructuredConversation({
+            platform: "DeepSeek",
+            conversationId: conversationId,
+            title: (inherited && inherited.title) || "",
+            conversationTime: conversationTime,
+            messages: messages
+          });
+        }
+      }
+
+      for (var i = 0; i < value.length; i++) {
+        scanDeepSeekConversations(value[i], inherited, depth + 1);
+      }
+      return;
+    }
+
+    var session = value.chat_session || value.chatSession || value.session || value.conversation || null;
+    var sessionContext = inherited || {};
+    if (session && typeof session === "object" && !Array.isArray(session)) {
+      sessionContext = {
+        conversationId: candidateConversationId(session) || (inherited && inherited.conversationId) || "",
+        title: candidateTitle(session) || (inherited && inherited.title) || "",
+        conversationTime: deepSeekConversationTime(session) || (inherited && inherited.conversationTime) || ""
+      };
+    }
+
+    var context = {
+      conversationId: candidateConversationId(value) || sessionContext.conversationId || "",
+      title: candidateTitle(value) || sessionContext.title || "",
+      conversationTime: deepSeekConversationTime(value) || sessionContext.conversationTime || ""
+    };
+
+    if (context.conversationId && context.conversationTime) {
+      postTimestamp(context.conversationId, context.conversationTime, "DeepSeek", {
+        title: context.title
+      });
+    }
+
+    var keys = Object.keys(value);
+    for (var j = 0; j < keys.length; j++) {
+      var child = value[keys[j]];
+      if (child && typeof child === "object") {
+        scanDeepSeekConversations(child, context, depth + 1);
+      }
+    }
+  }
+
+  function parseDeepSeekResponse(data) {
+    scanDeepSeekConversations(data, {}, 0);
+  }
+
+  // Doubao: /im/chain/single carries actual message records. The app also
+  // calls conversation-info endpoints with server/list timestamps; those are
+  // intentionally ignored unless the message objects themselves have times.
+  function doubaoRole(value) {
+    if (value === 1 || value === "1") {
+      return "user";
+    }
+    if (value === 2 || value === "2") {
+      return "assistant";
+    }
+    if (value === 3 || value === "3") {
+      return "system";
+    }
+
+    var text = String(value || "").toLowerCase();
+    if (/human|user|customer|prompt/.test(text)) {
+      return "user";
+    }
+    if (/aibot|assistant|bot|doubao|model|ai/.test(text)) {
+      return "assistant";
+    }
+    if (/system/.test(text)) {
+      return "system";
+    }
+
+    return normalizedRole(value);
+  }
+
+  function doubaoConversationId(obj) {
+    var value = firstValue(obj, [
+      "conversation_id",
+      "conversationId",
+      "local_conversation_id",
+      "localConversationId",
+      "section_id",
+      "sectionId",
+      "chat_id",
+      "chatId",
+      "thread_id",
+      "threadId",
+      "id"
+    ]);
+
+    return typeof value === "string" || typeof value === "number" ? String(value) : "";
+  }
+
+  function doubaoMessageTime(obj) {
+    return timeFromKeys(obj, MESSAGE_CREATE_TIME_KEYS);
+  }
+
+  function doubaoDirectContent(obj) {
+    if (!obj || typeof obj !== "object") {
+      return "";
+    }
+
+    for (var i = 0; i < STRUCTURED_CONTENT_KEYS.length; i++) {
+      var key = STRUCTURED_CONTENT_KEYS[i];
+      var value = obj[key];
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      if (/^(message|msg|payload|item|entity|data)$/i.test(key) && typeof value === "object" && !Array.isArray(value)) {
+        continue;
+      }
+
+      var text = textFromContentValue(value, 0);
+      if (text) {
+        return text;
+      }
+    }
+
+    return "";
+  }
+
+  function isDoubaoMessageLike(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      return false;
+    }
+
+    return Boolean(
+      firstValue(obj, ["user_type", "userType", "sender_type", "senderType", "role", "sender", "from", "author"]) !== "" ||
+      doubaoDirectContent(obj) ||
+      doubaoMessageTime(obj)
+    );
+  }
+
+  function unwrapDoubaoMessage(obj, depth) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj) || depth > 4) {
+      return obj;
+    }
+
+    if (isDoubaoMessageLike(obj)) {
+      return obj;
+    }
+
+    var wrapperKeys = [
+      "message",
+      "msg",
+      "chat_message",
+      "chatMessage",
+      "message_info",
+      "messageInfo",
+      "message_detail",
+      "messageDetail",
+      "payload",
+      "item",
+      "entity"
+    ];
+    for (var i = 0; i < wrapperKeys.length; i++) {
+      var child = obj[wrapperKeys[i]];
+      if (child && typeof child === "object" && !Array.isArray(child)) {
+        var unwrapped = unwrapDoubaoMessage(child, depth + 1);
+        if (isDoubaoMessageLike(unwrapped)) {
+          return unwrapped;
+        }
+      }
+    }
+
+    return obj;
+  }
+
+  function normalizeDoubaoMessage(obj) {
+    var source = unwrapDoubaoMessage(obj, 0);
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      return null;
+    }
+
+    var role = doubaoRole(firstValue(source, [
+      "user_type",
+      "userType",
+      "sender_type",
+      "senderType",
+      "role",
+      "sender",
+      "from",
+      "author",
+      "type",
+      "creator"
+    ]));
+    var content = contentFromKeys(source, STRUCTURED_CONTENT_KEYS);
+
+    if (!role || !content) {
+      return null;
+    }
+
+    return {
+      role: role,
+      content: content,
+      markdown: content,
+      time: doubaoMessageTime(source)
+    };
+  }
+
+  function scanDoubaoConversations(value, inherited, depth) {
+    if (!value || typeof value !== "object" || depth > 12) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length > 1000) {
+        return;
+      }
+
+      var messages = value.map(normalizeDoubaoMessage).filter(Boolean);
+      if (messages.length >= 2 && roleDiversity(messages)) {
+        var conversationId = (inherited && inherited.conversationId) || "";
+        if (!conversationId) {
+          conversationId = value.map(function (item) {
+            return doubaoConversationId(unwrapDoubaoMessage(item, 0));
+          }).find(Boolean) || "";
+        }
+
+        if (conversationId) {
+          var messageConversationTime = earliestMessageTime(messages);
+          if (messageConversationTime) {
+            postTimestamp(conversationId, messageConversationTime, "Doubao", {
+              title: (inherited && inherited.title) || ""
+            });
+          }
+          postStructuredConversation({
+            platform: "Doubao",
+            conversationId: conversationId,
+            title: (inherited && inherited.title) || "",
+            conversationTime: messageConversationTime,
+            messages: messages
+          });
+        }
+      }
+
+      for (var i = 0; i < value.length; i++) {
+        scanDoubaoConversations(value[i], inherited, depth + 1);
+      }
+      return;
+    }
+
+    var context = {
+      conversationId: doubaoConversationId(value) || (inherited && inherited.conversationId) || "",
+      title: candidateTitle(value) || (inherited && inherited.title) || ""
+    };
+
+    var keys = Object.keys(value);
+    for (var j = 0; j < keys.length; j++) {
+      var child = value[keys[j]];
+      if (child && typeof child === "object") {
+        scanDoubaoConversations(child, context, depth + 1);
+      }
+    }
+  }
+
+  function parseDoubaoResponse(data) {
+    scanDoubaoConversations(data, {}, 0);
   }
 
   // Gemini: intercept batchexecute responses
@@ -904,7 +1589,156 @@
     }
   }
 
-  function processJsonPayload(platform, data) {
+  function geminiRpcIdFromUrl(urlLike) {
+    try {
+      var url = new URL(urlLike, (window.location && window.location.href) || "https://gemini.google.com/");
+      return url.searchParams.get("rpcids") || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function safeGeminiUrlLabel(urlLike) {
+    try {
+      var url = new URL(urlLike, (window.location && window.location.href) || "https://gemini.google.com/");
+      var label = url.origin + url.pathname;
+      var rpcid = url.searchParams.get("rpcids");
+      var rt = url.searchParams.get("rt");
+      var parts = [];
+      if (rpcid) {
+        parts.push("rpcids=" + rpcid);
+      }
+      if (rt) {
+        parts.push("rt=" + rt);
+      }
+      return parts.length ? label + "?" + parts.join("&") : label;
+    } catch (_error) {
+      return String(urlLike || "").slice(0, 240);
+    }
+  }
+
+  function geminiTimestampPairsInText(text) {
+    var output = [];
+    var match;
+    var pairPattern = /\[\s*(1[6-9]\d{8}|2\d{9})\s*,\s*(\d{1,9})\s*\]/g;
+    while ((match = pairPattern.exec(text)) !== null && output.length < 300) {
+      var timestamp = geminiTimestampFromPair([Number(match[1]), Number(match[2])]);
+      if (timestamp) {
+        output.push({
+          index: match.index,
+          timestamp: timestamp,
+          shape: "[seconds,nanos]"
+        });
+      }
+    }
+
+    var msPattern = /\b(1[6-9]\d{11}|2\d{12})\b/g;
+    while ((match = msPattern.exec(text)) !== null && output.length < 300) {
+      var msTimestamp = validTimestamp(match[1]);
+      if (msTimestamp) {
+        output.push({
+          index: match.index,
+          timestamp: msTimestamp,
+          shape: "milliseconds"
+        });
+      }
+    }
+
+    return output;
+  }
+
+  function postGeminiDebugEvidenceFromText(text, sourceUrl, sourceKind) {
+    var body = String(text || "");
+    if (!body) {
+      return;
+    }
+
+    var idPattern = /(^|[^A-Za-z0-9_])(?:c_)?([a-f0-9]{8,})(?=[^A-Za-z0-9_]|$)/ig;
+    var ids = {};
+    var match;
+    while ((match = idPattern.exec(body)) !== null) {
+      var conversationId = normalizeGeminiConversationId(match[2]);
+      if (!conversationId) {
+        continue;
+      }
+
+      if (!ids[conversationId]) {
+        ids[conversationId] = {
+          conversationId: conversationId,
+          hitCount: 0,
+          hitIndexes: []
+        };
+      }
+
+      ids[conversationId].hitCount += 1;
+      if (ids[conversationId].hitIndexes.length < 8) {
+        ids[conversationId].hitIndexes.push(match.index + match[1].length);
+      }
+    }
+
+    var idKeys = Object.keys(ids);
+    if (!idKeys.length) {
+      return;
+    }
+
+    var timestamps = geminiTimestampPairsInText(body);
+    var idEvidence = idKeys.slice(0, 40).map(function (conversationId) {
+      var item = ids[conversationId];
+      var candidates = [];
+
+      for (var i = 0; i < item.hitIndexes.length; i++) {
+        var hitIndex = item.hitIndexes[i];
+        var nearby = timestamps
+          .map(function (candidate) {
+            return {
+              timestamp: candidate.timestamp,
+              shape: candidate.shape,
+              distanceFromConversationIdChars: Math.abs(candidate.index - hitIndex)
+            };
+          })
+          .filter(function (candidate) {
+            return candidate.distanceFromConversationIdChars <= 12000;
+          });
+
+        candidates = candidates.concat(nearby);
+      }
+
+      var seenCandidates = {};
+      candidates = candidates
+        .sort(function (a, b) {
+          return a.distanceFromConversationIdChars - b.distanceFromConversationIdChars ||
+            (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0);
+        })
+        .filter(function (candidate) {
+          var key = candidate.timestamp + ":" + candidate.shape + ":" + candidate.distanceFromConversationIdChars;
+          if (seenCandidates[key]) {
+            return false;
+          }
+          seenCandidates[key] = true;
+          return true;
+        })
+        .slice(0, 12);
+
+      return {
+        conversationId: conversationId,
+        hitCount: item.hitCount,
+        timestampCandidates: candidates
+      };
+    });
+
+    postGeminiDebugEvidence({
+      platform: "Gemini",
+      capturedAt: new Date().toISOString(),
+      source: sourceKind || "",
+      rpcid: geminiRpcIdFromUrl(sourceUrl),
+      url: safeGeminiUrlLabel(sourceUrl),
+      responseLength: body.length,
+      timestampCandidateCount: timestamps.length,
+      ids: idEvidence
+    });
+  }
+
+  function processJsonPayload(platform, data, sourceUrl) {
     if (!platform || data === undefined || data === null) {
       return;
     }
@@ -920,11 +1754,26 @@
     }
 
     if (platform === "grok") {
-      parseGrokResponse(data);
+      parseGrokResponse(data, sourceUrl);
+      return;
+    }
+
+    if (platform === "deepseek") {
+      parseDeepSeekResponse(data);
+      return;
+    }
+
+    if (platform === "doubao") {
+      parseDoubaoResponse(data);
       return;
     }
 
     if (platform === "gemini") {
+      try {
+        postGeminiDebugEvidenceFromText(JSON.stringify(data), sourceUrl || window.location.href, "json");
+      } catch (_error) {
+        // Debug evidence is best-effort only.
+      }
       scanStructuredConversations(data, "Gemini", {}, 0);
       if (Array.isArray(data)) {
         parseGeminiArrayForTimestamps(data, 0);
@@ -934,18 +1783,19 @@
     }
   }
 
-  function processTextPayload(platform, text) {
+  function processTextPayload(platform, text, sourceUrl) {
     if (!platform || !text) {
       return;
     }
 
     if (platform === "gemini") {
+      postGeminiDebugEvidenceFromText(text, sourceUrl || window.location.href, "text");
       parseGeminiResponse(text);
       return;
     }
 
     try {
-      processJsonPayload(platform, JSON.parse(text));
+      processJsonPayload(platform, JSON.parse(text), sourceUrl);
     } catch (_error) {
       // Not JSON, ignore.
     }
@@ -979,7 +1829,9 @@
       (platform === "chatgpt" && isChatGPTConversationEndpoint(url)) ||
       (platform === "claude" && isClaudeConversationEndpoint(url)) ||
       (platform === "grok" && isGrokConversationEndpoint(url)) ||
-      (platform === "gemini" && isGeminiEndpoint(url))
+      (platform === "gemini" && isGeminiEndpoint(url)) ||
+      (platform === "deepseek" && isGenericConversationEndpoint(url)) ||
+      (platform === "doubao" && isGenericConversationEndpoint(url))
     );
 
     if (!shouldIntercept) {
@@ -994,7 +1846,7 @@
         if (/json/i.test(contentType)) {
           cloned.json().then(function (data) {
             try {
-              processJsonPayload(platform, data);
+              processJsonPayload(platform, data, url);
             } catch (_e2) {
               // Parsing error, ignore
             }
@@ -1002,7 +1854,7 @@
         } else {
           cloned.text().then(function (text) {
             try {
-              processTextPayload(platform, text);
+              processTextPayload(platform, text, url);
             } catch (_e3) {
               // Parsing error, ignore
             }
@@ -1038,7 +1890,9 @@
       (platform === "chatgpt" && isChatGPTConversationEndpoint(url)) ||
       (platform === "claude" && isClaudeConversationEndpoint(url)) ||
       (platform === "grok" && isGrokConversationEndpoint(url)) ||
-      (platform === "gemini" && isGeminiEndpoint(url))
+      (platform === "gemini" && isGeminiEndpoint(url)) ||
+      (platform === "deepseek" && isGenericConversationEndpoint(url)) ||
+      (platform === "doubao" && isGenericConversationEndpoint(url))
     );
 
     if (shouldIntercept) {
@@ -1049,7 +1903,7 @@
             return;
           }
 
-          processTextPayload(platform, text);
+          processTextPayload(platform, text, url);
         } catch (_e2) {
           // Error processing response, ignore
         }
@@ -1060,7 +1914,7 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Also scan existing __NEXT_DATA__ for Claude (available at page load)
+  // Also scan existing framework bootstrap JSON (available at page load)
   // ---------------------------------------------------------------------------
 
   function scanNextData() {
@@ -1068,7 +1922,7 @@
       var nextDataEl = document.getElementById("__NEXT_DATA__");
       if (nextDataEl && nextDataEl.textContent) {
         var data = JSON.parse(nextDataEl.textContent);
-        parseClaudeResponse(data);
+        processJsonPayload(detectPlatform(window.location.href), data);
       }
     } catch (_e) {
       // Not available or not parseable

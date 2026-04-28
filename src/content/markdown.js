@@ -321,6 +321,21 @@
       return false;
     }
 
+    const reasoningTokens = [
+      element.className,
+      element.getAttribute("data-testid"),
+      element.getAttribute("data-test-id"),
+      element.getAttribute("data-role"),
+      element.getAttribute("aria-label")
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (
+      reasoningTokens.includes("ds-think-content") ||
+      /(?:^|[\s_-])(?:think|thinking|reasoning|cot|chain-of-thought)(?:[\s_-]|$)/.test(reasoningTokens) ||
+      /模型思考|思考过程|深度思考/.test(reasoningTokens)
+    ) {
+      return true;
+    }
+
     if (isUiChromeText(normalizedElementText(element))) {
       return true;
     }
@@ -841,18 +856,39 @@
       .join("\n\n");
   }
 
+  function conversationDisplayTitle(conversation) {
+    const platform = conversation.platform || "";
+    const title = utils.truncate(conversation.title, 140);
+    if (title && !utils.isGenericConversationTitle(title, platform)) {
+      return title;
+    }
+
+    const firstUserMessage = (conversation.messages || []).find((message) => message.role === "user");
+    const firstMessage = firstUserMessage || (conversation.messages || [])[0] || {};
+    const fallback = utils.truncate(utils.firstMeaningfulLine(firstMessage.content || firstMessage.markdown || ""), 140);
+    return fallback || title || "AI Chat";
+  }
+
+  function withDisplayTitle(conversation) {
+    return {
+      ...conversation,
+      title: conversationDisplayTitle(conversation)
+    };
+  }
+
   function buildMarkdown(conversation) {
-    const title = utils.truncate(conversation.title, 140) || "AI Chat";
-    const frontMatter = buildFrontMatter(conversation);
-    const metadata = buildMetadataSection(conversation);
-    const messages = buildMessages(conversation);
+    const displayConversation = withDisplayTitle(conversation);
+    const title = displayConversation.title;
+    const frontMatter = buildFrontMatter(displayConversation);
+    const metadata = buildMetadataSection(displayConversation);
+    const messages = buildMessages(displayConversation);
 
     return compactMarkdown(`${frontMatter}# ${title}\n\n${metadata}${messages}`) + "\n";
   }
 
   function buildFilename(conversation) {
     const platform = utils.makeSlug(conversation.platform || "AI", "AI");
-    const title = utils.makeSlug(conversation.title || utils.firstMeaningfulLine((conversation.messages || [])[0]?.content), "AI_Chat");
+    const title = utils.makeSlug(conversationDisplayTitle(conversation), "AI_Chat");
     const date = utils.formatDateForFilename(conversation.conversationTime);
     const prefix = date ? `${date}_` : "";
     return `${prefix}${platform}_${title}.md`;

@@ -262,7 +262,7 @@
     }
 
     if (
-      /\b(assistant|model|answer|response|bot|claude|gemini|grok)\b/.test(tokens) ||
+      /\b(assistant|model|answer|response|bot|claude|gemini|grok|deepseek|doubao)\b/.test(tokens) ||
       tokens.includes("model-response") ||
       tokens.includes("font-claude")
     ) {
@@ -800,8 +800,15 @@
     const fromNode = titleNode ? textOf(titleNode) : "";
     const fromDocument = utils.stripPlatformFromTitle(global.document.title || "", platformLabel);
     const fromFirstQuestion = (messages || []).find((message) => message.role === "user")?.content || "";
-    const raw = fromNode || fromDocument || utils.firstMeaningfulLine(fromFirstQuestion) || `${platformLabel} Chat`;
-    return utils.truncate(utils.stripPlatformFromTitle(raw, platformLabel), 120);
+    const candidates = [
+      fromNode,
+      fromDocument,
+      utils.firstMeaningfulLine(fromFirstQuestion)
+    ]
+      .map((value) => utils.truncate(utils.stripPlatformFromTitle(value, platformLabel), 120))
+      .filter(Boolean);
+    const specific = candidates.find((value) => !utils.isGenericConversationTitle(value, platformLabel));
+    return specific || candidates[0] || `${platformLabel} Chat`;
   }
 
   function extractConversationIdFromUrl(urlLike) {
@@ -944,6 +951,32 @@
     }
   }
 
+  function extractConversationTime(options = {}) {
+    const conversationId = options.conversationId || "";
+    const messages = options.messages || [];
+    const root = options.root || global.document.body;
+    const sourceUrl = options.sourceUrl || global.location.href;
+    const visibleHistoryTime = extractTimeFromVisibleHistory(sourceUrl);
+    const allowTimestampCache = options.allowTimestampCache !== false;
+    const allowMessageTimes = options.allowMessageTimes !== false;
+    const allowDocumentTime = options.allowDocumentTime !== false;
+    const allowScriptTime = options.allowScriptTime !== false;
+    const allowVisibleHistoryTime = options.allowVisibleHistoryTime !== false;
+
+    if (options.visibleHistoryConversationTimeOnly) {
+      return visibleHistoryTime;
+    }
+
+    return (
+      (options.preferVisibleHistoryConversationTime ? visibleHistoryTime : "") ||
+      (allowTimestampCache ? extractTimeFromCache(conversationId) : "") ||
+      (allowMessageTimes ? earliestMessageTime(messages) : "") ||
+      (allowDocumentTime ? extractTimeFromDocument(root) : "") ||
+      (allowScriptTime ? extractTimeFromScripts(conversationId) : "") ||
+      (allowVisibleHistoryTime ? visibleHistoryTime : "")
+    );
+  }
+
   function extractWithConfig(config) {
     const root = global.document.querySelector(config.rootSelector || "main") || global.document.body;
     const selectorMessages = extractMessagesBySelectors(root, config.messageSelectors, config);
@@ -956,17 +989,19 @@
     const platformLabel = config.platformLabel;
     const title = deriveTitle(global.document, platformLabel, config.titleSelectors, messages);
     const conversationId = extractConversationIdFromUrl(global.location.href);
-    const visibleHistoryTime = extractTimeFromVisibleHistory(global.location.href);
-    const conversationTime = config.visibleHistoryConversationTimeOnly
-      ? visibleHistoryTime
-      : (
-        (config.preferVisibleHistoryConversationTime ? visibleHistoryTime : "") ||
-        extractTimeFromCache(conversationId) ||
-        earliestMessageTime(messages) ||
-        extractTimeFromDocument(root) ||
-        extractTimeFromScripts(conversationId) ||
-        visibleHistoryTime
-      );
+    const conversationTime = extractConversationTime({
+      conversationId,
+      messages,
+      root,
+      sourceUrl: global.location.href,
+      visibleHistoryConversationTimeOnly: config.visibleHistoryConversationTimeOnly,
+      preferVisibleHistoryConversationTime: config.preferVisibleHistoryConversationTime,
+      allowTimestampCache: config.allowTimestampCache,
+      allowMessageTimes: config.allowMessageTimes,
+      allowDocumentTime: config.allowDocumentTime,
+      allowScriptTime: config.allowScriptTime,
+      allowVisibleHistoryTime: config.allowVisibleHistoryTime
+    });
 
     return mergeStructuredConversation({
       platform: platformLabel,
@@ -988,6 +1023,9 @@
     const cacheEntry = timestampCache && timestampCache.getCacheEntry
       ? timestampCache.getCacheEntry(conversationId)
       : null;
+    const geminiDebugEvidence = platformLabel === "Gemini" && timestampCache && timestampCache.getGeminiDebugEvidence
+      ? timestampCache.getGeminiDebugEvidence(conversationId).slice(-10)
+      : [];
     const structuredCache = namespace.StructuredConversationCache;
     const structuredConversation = matchingStructuredConversation(platformLabel, conversationId);
     const latestStructuredConversation = structuredCache && structuredCache.latestConversation
@@ -1065,6 +1103,7 @@
       cachedTimestamp: (cacheEntry && cacheEntry.timestamp) || "",
       cachedUpdatedAt: (cacheEntry && cacheEntry.updatedAt) || "",
       cachedTitle: (cacheEntry && cacheEntry.title) || "",
+      geminiDebugEvidence,
       structuredConversationId: (structuredConversation && structuredConversation.conversationId) || "",
       structuredConversationTime: (structuredConversation && structuredConversation.conversationTime) || "",
       structuredMessageCount: structuredConversation && structuredConversation.messages
@@ -1083,6 +1122,7 @@
   namespace.AdapterCommon = {
     collectDebugSnapshot,
     dropAssistantEchoesOfUser,
+    extractConversationTime,
     extractWithConfig,
     mergeStructuredConversation,
     mergeAdjacentSameRoleMessages,
