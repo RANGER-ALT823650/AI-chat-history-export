@@ -29,6 +29,9 @@ async function loadBrowserCore() {
     "src/content/markdown.js",
     "src/content/adapters/common.js",
     "src/content/adapters/chatgpt.js",
+    "src/content/adapters/grok.js",
+    "src/content/adapters/deepseek.js",
+    "src/content/adapters/doubao.js",
     "src/content/history-discovery.js"
   ]) {
     const source = await readFile(join(projectRoot, file), "utf8");
@@ -42,11 +45,46 @@ async function loadBrowserCore() {
 async function loadAdapterConfig(adapterFile, adapterName) {
   const context = {
     AIChatExporter: {
+      Markdown: {
+        htmlToMarkdown() {
+          return "";
+        }
+      },
+      PlatformUtils: {
+        firstMeaningfulLine: browserCore.PlatformUtils?.firstMeaningfulLine || ((value) => String(value || "")),
+        normalizeWhitespace(value) {
+          return String(value || "").trim();
+        },
+        stripPlatformFromTitle(title) {
+          return String(title || "");
+        },
+        truncate(value) {
+          return String(value || "");
+        }
+      },
       AdapterCommon: {
         extractWithConfig(config) {
           return config;
+        },
+        mergeAdjacentSameRoleMessages(messages) {
+          return messages || [];
+        },
+        mergeStructuredConversation(conversation) {
+          return conversation;
         }
       }
+    },
+    document: {
+      title: "",
+      querySelector() {
+        return null;
+      },
+      querySelectorAll() {
+        return [];
+      }
+    },
+    location: {
+      href: "https://example.com/"
     }
   };
   context.globalThis = context;
@@ -83,6 +121,7 @@ async function collectInterceptorMessages(url, payload, options = {}) {
   XMLHttpRequestMock.prototype.send = function () {};
 
   const context = {
+    URL,
     console,
     setTimeout,
     clearTimeout,
@@ -114,10 +153,58 @@ async function collectInterceptorMessages(url, payload, options = {}) {
   return posted;
 }
 
+async function listExportedFilesWithHarness(downloadItems) {
+  let listener = null;
+  const context = {
+    URL,
+    console,
+    TextDecoder,
+    TextEncoder,
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    chrome: {
+      downloads: {
+        search(_query, callback) {
+          callback(downloadItems);
+        }
+      },
+      runtime: {
+        lastError: null,
+        onMessage: {
+          addListener(callback) {
+            listener = callback;
+          }
+        }
+      }
+    }
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+
+  const source = await readFile(join(projectRoot, "src/background.js"), "utf8");
+  vm.runInContext(source, context, { filename: "src/background.js" });
+
+  return new Promise((resolve) => {
+    listener({ type: "LIST_EXPORTED_MARKDOWN_FILES" }, {}, resolve);
+  });
+}
+
+function markdownDownloadItem(relativePath, markdown) {
+  return {
+    id: 1,
+    exists: true,
+    filename: `/Users/mayifan/Downloads/AI Chat Exports/${relativePath}`,
+    url: `data:text/markdown;charset=utf-8;base64,${Buffer.from(markdown, "utf8").toString("base64")}`
+  };
+}
+
 const browserCore = await loadBrowserCore();
 const { PlatformUtils, Markdown, AdapterCommon, BatchHistory } = browserCore;
 const browserGlobal = browserCore.__testGlobal;
+const geminiConfig = await loadAdapterConfig("src/content/adapters/gemini.js", "GeminiAdapter");
 const grokConfig = await loadAdapterConfig("src/content/adapters/grok.js", "GrokAdapter");
+const deepSeekConfig = await loadAdapterConfig("src/content/adapters/deepseek.js", "DeepSeekAdapter");
+const doubaoConfig = await loadAdapterConfig("src/content/adapters/doubao.js", "DoubaoAdapter");
 
 function textNode(value) {
   return {
@@ -398,7 +485,11 @@ assert.equal(PlatformUtils.detectPlatformFromUrl("https://chat.openai.com/c/1234
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://claude.ai/chat/123").id, "claude");
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://grok.com/chat/123").id, "grok");
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://x.com/i/grok").id, "grok");
+assert.equal(PlatformUtils.detectPlatformFromUrl("https://chat.deepseek.com/a/chat/s/123456789").id, "deepseek");
+assert.equal(PlatformUtils.detectPlatformFromUrl("https://www.doubao.com/chat/123456789").id, "doubao");
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://example.com"), null);
+assert.equal(PlatformUtils.isGenericConversationTitle("与 Gemini 对话", "Gemini"), true);
+assert.equal(PlatformUtils.isGenericConversationTitle("环路积分符号怎么理解", "Gemini"), false);
 assert.equal(
   BatchHistory.normalizeConversationUrl("https://chatgpt.com/c/abc123456789?model=gpt-4#bottom"),
   "https://chatgpt.com/c/abc123456789"
@@ -419,8 +510,53 @@ assert.equal(
   BatchHistory.normalizeConversationUrl("https://grok.com/c/def123456789?ref=sidebar"),
   "https://grok.com/c/def123456789"
 );
+assert.equal(
+  BatchHistory.normalizeConversationUrl("https://chat.deepseek.com/a/chat/s/deepseek123456789?foo=bar"),
+  "https://chat.deepseek.com/a/chat/s/deepseek123456789"
+);
+assert.equal(
+  BatchHistory.normalizeConversationUrl("https://www.doubao.com/chat/doubao123456789?enter_from=sidebar"),
+  "https://www.doubao.com/chat/doubao123456789"
+);
 assert.equal(BatchHistory.normalizeConversationUrl("https://grok.com/share/not-account-history"), "");
 assert.equal(BatchHistory.conversationIdFromUrl("https://claude.ai/chat/abc123456789"), "abc123456789");
+
+const exportedFileList = await listExportedFilesWithHarness([
+  markdownDownloadItem("Gemini/2026-03-19_Gemini_与_Gemini_对话.md", `---
+platform: "Gemini"
+source_url: "https://gemini.google.com/app/geminimetadata123?hl=zh-CN"
+conversation_title: "真实 Gemini 标题"
+conversation_time: "2026-03-19"
+conversation_id: "geminimetadata123"
+---
+
+# 真实 Gemini 标题
+
+## Metadata
+
+- Platform: Gemini
+- Source URL: https://gemini.google.com/app/geminimetadata123
+- Conversation ID: geminimetadata123
+`)
+]);
+assert.equal(exportedFileList.ok, true);
+assert.equal(exportedFileList.files.length, 1);
+assert.equal(exportedFileList.files[0].metadata.platform, "Gemini");
+assert.equal(exportedFileList.files[0].metadata.sourceUrl, "https://gemini.google.com/app/geminimetadata123?hl=zh-CN");
+assert.equal(exportedFileList.files[0].metadata.conversationId, "geminimetadata123");
+assert.equal(exportedFileList.files[0].metadata.title, "真实 Gemini 标题");
+
+assert.equal(geminiConfig.platformLabel, "Gemini");
+assert.equal(geminiConfig.preferVisibleHistoryConversationTime, true);
+assert.equal(geminiConfig.disableMessageTimeExtraction, true);
+assert.equal(geminiConfig.allowDocumentTime, false);
+assert.equal(geminiConfig.allowScriptTime, false);
+assert.notEqual(geminiConfig.disableStructuredTimes, true);
+assert.equal(grokConfig.allowVisibleHistoryTime, false);
+assert.equal(grokConfig.allowDocumentTime, false);
+assert.equal(grokConfig.allowScriptTime, false);
+assert.equal(deepSeekConfig.platformLabel, "DeepSeek");
+assert.equal(doubaoConfig.platformLabel, "Doubao");
 assert.equal(BatchHistory.firstMatchDate("洗车店距离问题 2026年4月10日").date, "2026-04-10");
 assert.equal(BatchHistory.firstMatchDate("Troubleshooting VMware Apr 9, 2026").date, "2026-04-09");
 assert.equal(AdapterCommon.readTimeCandidate("1712591700"), "2024-04-08T15:55:00.000Z");
@@ -441,6 +577,22 @@ assert.equal(geminiHistoryRow.contains(geminiHistoryLink), true);
 assert.equal(geminiHistoryMetadata.title, "洗车店距离问题");
 assert.equal(geminiHistoryMetadata.conversationTime, "2026-04-10");
 
+const previousTimestampCache = browserCore.TimestampCache;
+browserCore.TimestampCache = {
+  getTimestamp(conversationId) {
+    return conversationId === "geminicachetime123" ? "2026-04-16T10:00:00.000Z" : "";
+  }
+};
+const geminiCachedTimeRoot = element("nav", {}, [
+  element("a", { href: "https://gemini.google.com/app/geminicachetime123" }, [textNode("缓存时间兜底")])
+]);
+browserGlobal.document = documentFrom(geminiCachedTimeRoot, "Cached Time - Gemini");
+browserGlobal.location = { href: "https://gemini.google.com/app/geminicachetime123" };
+const geminiCachedTimeItems = BatchHistory.collectConversationLinks(browserGlobal.document, "gemini");
+assert.equal(geminiCachedTimeItems.length, 1);
+assert.equal(geminiCachedTimeItems[0].conversationTime, "2026-04-16T10:00:00.000Z");
+browserCore.TimestampCache = previousTimestampCache;
+
 testNodeOrder = 0;
 const geminiSearchLink = element("a", { href: "https://gemini.google.com/app/62c97c580942a142" }, [
   textNode("运动文胸标志镜像问题")
@@ -457,6 +609,41 @@ const geminiSearchItems = BatchHistory.collectConversationLinks(browserGlobal.do
 assert.equal(geminiSearchItems.length, 1);
 assert.equal(geminiSearchItems[0].title, "运动文胸标志镜像问题");
 assert.equal(geminiSearchItems[0].conversationTime, BatchHistory.firstMatchDate("4月7日").date);
+
+testNodeOrder = 0;
+const geminiSidebarSearchLinks = element("conversations-list", { "data-testid": "all-conversations" }, [
+  element("a", { href: "https://gemini.google.com/app/searchresult123456" }, [
+    element("div", { class: "conversation-title" }, [textNode("真实搜索结果日期")])
+  ]),
+  element("a", { href: "https://gemini.google.com/app/searchresult234567" }, [
+    element("div", { class: "conversation-title" }, [textNode("第二条搜索结果")])
+  ])
+]);
+const geminiModernSearchRoot = element("main", {}, [
+  geminiSidebarSearchLinks,
+  element("div", { role: "listbox", class: "recent-conversations-container" }, [
+    element("div", { role: "option", class: "conversation-container" }, [
+      element("div", { class: "left-content-container" }, [
+        element("div", { class: "title" }, [textNode("真实搜索结果日期")])
+      ]),
+      element("div", { class: "right-content-container date" }, [textNode("4月15日")])
+    ]),
+    element("div", { role: "option", class: "conversation-container" }, [
+      element("div", { class: "left-content-container" }, [
+        element("div", { class: "title" }, [textNode("第二条搜索结果")])
+      ]),
+      element("div", { class: "right-content-container date" }, [textNode("4月14日")])
+    ])
+  ])
+]);
+browserGlobal.document = documentFrom(geminiModernSearchRoot, "搜索 - Gemini");
+browserGlobal.location = { href: "https://gemini.google.com/search?hl=zh-CN" };
+const geminiModernSearchItems = BatchHistory.collectConversationLinks(browserGlobal.document, "gemini");
+assert.equal(geminiModernSearchItems.length, 2);
+assert.equal(geminiModernSearchItems[0].url, "https://gemini.google.com/app/searchresult123456");
+assert.equal(geminiModernSearchItems[0].conversationId, "searchresult123456");
+assert.equal(geminiModernSearchItems[0].conversationTime, BatchHistory.firstMatchDate("4月15日").date);
+assert.equal(geminiModernSearchItems[0].rawDateText, "4月15日");
 
 testNodeOrder = 0;
 const historyFallbackRoot = element("main", {}, [
@@ -501,13 +688,15 @@ const geminiOldTimeRoot = element("main", {}, [
   element("div", { class: "user" }, [textNode("Visible Gemini question")]),
   element("div", { class: "assistant" }, [textNode("Visible Gemini answer")])
 ]);
-browserGlobal.document = documentFrom(geminiOldTimeRoot, "Gemini old time disabled - Gemini");
+browserGlobal.document = documentFrom(geminiOldTimeRoot, "Gemini old time fallback - Gemini");
 browserGlobal.location = { href: "https://gemini.google.com/app/geminioldtime123" };
-const geminiOldTimeDisabled = AdapterCommon.extractWithConfig({
+const geminiOldTimeFallback = AdapterCommon.extractWithConfig({
   platformLabel: "Gemini",
-  visibleHistoryConversationTimeOnly: true,
+  preferVisibleHistoryConversationTime: true,
   disableMessageTimeExtraction: true,
-  disableStructuredTimes: true,
+  allowMessageTimes: false,
+  allowDocumentTime: false,
+  allowScriptTime: false,
   rootSelector: "main",
   titleSelectors: [],
   messageSelectors: [
@@ -516,9 +705,9 @@ const geminiOldTimeDisabled = AdapterCommon.extractWithConfig({
   ],
   disableGenericExtraction: true
 });
-assert.equal(geminiOldTimeDisabled.conversationTime, "");
-assert.equal(geminiOldTimeDisabled.messages[0].time, "");
-assert.equal(geminiOldTimeDisabled.messages[1].time, "");
+assert.equal(geminiOldTimeFallback.conversationTime, "2025-11-15T09:09:37.522Z");
+assert.equal(geminiOldTimeFallback.messages[0].time, "2025-11-15T09:09:37.522Z");
+assert.equal(geminiOldTimeFallback.messages[1].time, "2025-11-15T09:09:38.000Z");
 
 browserCore.StructuredConversationCache.cacheConversation({
   platform: "Claude",
@@ -617,6 +806,500 @@ assert.equal(claudeApiFallback.result.messages[0].time, "2026-04-12T06:38:27.822
 assert.equal(claudeApiFallback.result.messages[1].time, "2026-04-12T06:38:51.802839Z");
 assert.equal(claudeApiFallback.cached[0].conversationTime, "2026-04-12T06:38:27.489892Z");
 
+const grokInterceptorMessages = await collectInterceptorMessages(
+  "https://grok.com/rest/app-chat/conversations/grok-api-123456789/load-responses",
+  {
+    responses: [
+      {
+        responseId: "grok-response-user-1",
+        sender: "human",
+        createTime: "2026-04-12T09:00:01.000Z",
+        message: "Grok question"
+      },
+      {
+        responseId: "grok-response-assistant-1",
+        sender: "assistant",
+        createTime: "2026-04-12T09:00:02.000Z",
+        message: "Grok answer"
+      }
+    ]
+  }
+);
+const grokStructuredMessage = grokInterceptorMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
+assert.equal(grokStructuredMessage.conversation.platform, "Grok");
+assert.equal(grokStructuredMessage.conversation.conversationId, "grok-api-123456789");
+assert.equal(grokStructuredMessage.conversation.conversationTime, "2026-04-12T09:00:01.000Z");
+assert.equal(grokStructuredMessage.conversation.messages[0].time, "2026-04-12T09:00:01.000Z");
+
+const grokUpdatedOnlyMessages = await collectInterceptorMessages(
+  "https://grok.com/rest/app-chat/conversations",
+  {
+    conversations: [
+      {
+        conversationId: "grok-updated-only-123456789",
+        title: "Updated only should not be chat time",
+        updatedAt: "2026-04-20T08:00:00.000Z"
+      }
+    ]
+  }
+);
+assert.equal(
+  grokUpdatedOnlyMessages.some((message) => message.type === "AI_CHAT_EXPORTER_TIMESTAMP"),
+  false
+);
+
+testNodeOrder = 0;
+const grokApiFallbackRoot = element("main", {}, [
+  element("div", { class: "message-bubble self-end" }, [textNode("Grok DOM question")]),
+  element("div", { class: "message-bubble" }, [
+    element("div", { class: "response-content-markdown markdown" }, [
+      element("p", {}, [textNode("Grok DOM answer")])
+    ])
+  ])
+]);
+const grokFetchCalls = [];
+browserGlobal.document = documentFrom(grokApiFallbackRoot, "Grok API fallback - Grok");
+browserGlobal.location = { href: "https://grok.com/c/grok-adapter-123456789" };
+browserGlobal.fetch = (url, init = {}) => {
+  grokFetchCalls.push({ url, init });
+  if (String(url) === "/rest/app-chat/conversations") {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        conversations: [
+          {
+            conversationId: "grok-adapter-123456789",
+            title: "Grok API fallback",
+            updatedAt: "2026-04-20T08:00:00.000Z"
+          }
+        ]
+      })
+    });
+  }
+
+  if (String(url).includes("/response-node")) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        responseNodes: [
+          { responseId: "grok-adapter-user-1" },
+          { responseId: "grok-adapter-assistant-1" }
+        ]
+      })
+    });
+  }
+
+  if (String(url).includes("/load-responses")) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        responses: [
+          {
+            responseId: "grok-adapter-user-1",
+            sender: "human",
+            createTime: "2026-04-12T09:30:01.000Z",
+            message: "Grok API question"
+          },
+          {
+            responseId: "grok-adapter-assistant-1",
+            sender: "assistant",
+            createTime: "2026-04-12T09:30:02.000Z",
+            message: "Grok API answer"
+          }
+        ]
+      })
+    });
+  }
+
+  return Promise.resolve({ ok: false });
+};
+const grokApiFallbackConversation = await browserCore.GrokAdapter.extract();
+assert.equal(grokApiFallbackConversation.conversationTime, "2026-04-12T09:30:01.000Z");
+assert.equal(grokApiFallbackConversation.messages[0].time, "2026-04-12T09:30:01.000Z");
+assert.equal(grokApiFallbackConversation.messages[1].time, "2026-04-12T09:30:02.000Z");
+assert.ok(grokFetchCalls.some((call) => String(call.url).includes("/response-node")));
+assert.ok(grokFetchCalls.some((call) => call.init.method === "POST" && String(call.url).includes("/load-responses")));
+delete browserGlobal.fetch;
+
+const deepSeekInterceptorMessages = await collectInterceptorMessages(
+  "https://chat.deepseek.com/api/v0/chat_session/fetch",
+  {
+    conversation_id: "deepseek-api-123456789",
+    title: "DeepSeek API",
+    created_at: "2026-04-13T07:00:00.000Z",
+    messages: [
+      {
+        role: "user",
+        created_at: "2026-04-13T07:00:01.000Z",
+        content: "DeepSeek question"
+      },
+      {
+        role: "assistant",
+        created_at: "2026-04-13T07:00:02.000Z",
+        content: [
+          { type: "reasoning", text: "DeepSeek hidden chain of thought" },
+          { type: "text", text: "DeepSeek answer" }
+        ]
+      }
+    ]
+  }
+);
+const deepSeekStructuredMessage = deepSeekInterceptorMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
+assert.equal(deepSeekStructuredMessage.conversation.platform, "DeepSeek");
+assert.equal(deepSeekStructuredMessage.conversation.conversationId, "deepseek-api-123456789");
+assert.equal(deepSeekStructuredMessage.conversation.conversationTime, "2026-04-13T07:00:00.000Z");
+assert.equal(deepSeekStructuredMessage.conversation.messages[1].time, "2026-04-13T07:00:02.000Z");
+assert.equal(deepSeekStructuredMessage.conversation.messages[1].content, "DeepSeek answer");
+assert.doesNotMatch(deepSeekStructuredMessage.conversation.messages[1].content, /hidden chain of thought/);
+
+const deepSeekHistoryMessages = await collectInterceptorMessages(
+  "https://chat.deepseek.com/api/v0/chat/history_messages?chat_session_id=deepseek-history-123456789",
+  {
+    data: {
+      biz_data: {
+        chat_session: {
+          id: "deepseek-history-123456789",
+          title: "DeepSeek current API",
+          updated_at: 1776999999
+        },
+        chat_messages: [
+          {
+            message_id: "deepseek-history-user-1",
+            role: "USER",
+            inserted_at: 1776064201,
+            content: "DeepSeek history question"
+          },
+          {
+            message_id: "deepseek-history-assistant-1",
+            role: "ASSISTANT",
+            inserted_at: 1776064202,
+            fragments: [
+              { type: "reasoning", text: "DeepSeek history hidden thinking" },
+              { type: "TEXT", text: "DeepSeek history answer" }
+            ]
+          }
+        ]
+      }
+    }
+  }
+);
+const deepSeekHistoryStructured = deepSeekHistoryMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
+assert.equal(deepSeekHistoryStructured.conversation.platform, "DeepSeek");
+assert.equal(deepSeekHistoryStructured.conversation.conversationId, "deepseek-history-123456789");
+assert.equal(deepSeekHistoryStructured.conversation.conversationTime, "2026-04-13T07:10:01.000Z");
+assert.equal(deepSeekHistoryStructured.conversation.messages[0].time, "2026-04-13T07:10:01.000Z");
+assert.equal(deepSeekHistoryStructured.conversation.messages[1].content, "DeepSeek history answer");
+assert.doesNotMatch(deepSeekHistoryStructured.conversation.conversationTime, /2026-04-24/);
+assert.doesNotMatch(deepSeekHistoryStructured.conversation.messages[1].content, /hidden thinking/);
+
+const doubaoInterceptorMessages = await collectInterceptorMessages(
+  "https://www.doubao.com/samantha/chat/conversation",
+  {
+    conversationId: "doubao-api-123456789",
+    chatTitle: "Doubao API",
+    createTime: "2026-04-14T08:00:00.000Z",
+    data: {
+      messages: [
+        {
+          sender: "user",
+          createTime: "2026-04-14T08:00:01.000Z",
+          text: "Doubao question"
+        },
+        {
+          sender: "assistant",
+          createTime: "2026-04-14T08:00:02.000Z",
+          text: "Doubao answer"
+        }
+      ]
+    }
+  }
+);
+const doubaoStructuredMessage = doubaoInterceptorMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
+assert.equal(doubaoStructuredMessage.conversation.platform, "Doubao");
+assert.equal(doubaoStructuredMessage.conversation.conversationId, "doubao-api-123456789");
+assert.equal(doubaoStructuredMessage.conversation.conversationTime, "2026-04-14T08:00:01.000Z");
+assert.equal(doubaoStructuredMessage.conversation.messages[0].time, "2026-04-14T08:00:01.000Z");
+
+const doubaoImChainMessages = await collectInterceptorMessages(
+  "https://www.doubao.com/im/chain/single",
+  {
+    cmd: 3100,
+    downlink_body: {
+      pull_singe_chain_downlink_body: {
+        messages: [
+          {
+            conversation_id: "38413899923457538",
+            message_id: "doubao-im-user-1",
+            user_type: 1,
+            create_time: 1776154201,
+            content: JSON.stringify({ text: "Doubao IM question" })
+          },
+          {
+            conversation_id: "38413899923457538",
+            message_id: "doubao-im-assistant-1",
+            user_type: 2,
+            create_time: 1776154202,
+            content: "",
+            content_block: [
+              {
+                block_type: 10000,
+                content: {
+                  text_block: {
+                    text: "Doubao IM answer"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+);
+const doubaoImStructured = doubaoImChainMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
+assert.equal(doubaoImStructured.conversation.platform, "Doubao");
+assert.equal(doubaoImStructured.conversation.conversationId, "38413899923457538");
+assert.equal(doubaoImStructured.conversation.conversationTime, "2026-04-14T08:10:01.000Z");
+assert.equal(doubaoImStructured.conversation.messages[1].content, "Doubao IM answer");
+
+const doubaoServerTimeOnlyMessages = await collectInterceptorMessages(
+  "https://www.doubao.com/samantha/chat/conversation",
+  {
+    conversationId: "doubao-server-time-123456789",
+    chatTitle: "Doubao server time is not chat time",
+    createTime: "2025-12-24T01:28:59.000Z",
+    data: {
+      messages: [
+        { sender: "user", text: "Question without message time" },
+        { sender: "assistant", text: "Answer without message time" }
+      ]
+    }
+  }
+);
+assert.equal(
+  doubaoServerTimeOnlyMessages.some((message) => message.type === "AI_CHAT_EXPORTER_TIMESTAMP"),
+  false
+);
+const doubaoServerTimeStructured = doubaoServerTimeOnlyMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
+assert.equal(doubaoServerTimeStructured.conversation.conversationTime, "");
+
+browserCore.TimestampCache = {
+  getTimestamp(conversationId) {
+    return {
+      "deepseek-time-123456789": "2026-04-15T09:00:00.000Z",
+      "doubao-time-123456789": "2025-12-24T01:28:59.000Z"
+    }[conversationId] || "";
+  },
+  getCacheEntry() {
+    return null;
+  }
+};
+browserCore.StructuredConversationCache.cacheConversation({
+  platform: "Doubao",
+  conversationId: "doubao-time-123456789",
+  title: "Doubao structured time",
+  conversationTime: "2026-04-15T10:00:00.000Z",
+  messages: [
+    { role: "user", content: "Doubao DOM question", time: "2026-04-15T10:00:00.000Z" },
+    { role: "assistant", content: "Doubao DOM answer", time: "2026-04-15T10:00:01.000Z" }
+  ]
+});
+
+testNodeOrder = 0;
+const deepSeekDomRoot = element("main", {}, [
+  element("div", { class: "ds-virtual-list-visible-items" }, [
+    element("div", { "data-virtual-list-item-key": "1" }, [
+      element("div", { class: "user-message" }, [textNode("DeepSeek DOM question")])
+    ]),
+    element("div", { "data-virtual-list-item-key": "2" }, [
+      element("div", { class: "ds-message" }, [
+        element("div", { class: "ds-think-content" }, [
+          element("p", {}, [textNode("DeepSeek DOM hidden thinking")])
+        ]),
+        element("div", { class: "ds-markdown" }, [
+          element("p", {}, [textNode("DeepSeek DOM final answer")])
+        ])
+      ])
+    ])
+  ])
+]);
+browserGlobal.document = documentFrom(deepSeekDomRoot, "DeepSeek DOM - DeepSeek");
+browserGlobal.location = { href: "https://chat.deepseek.com/a/chat/s/deepseek-time-123456789" };
+const deepSeekDomConversation = await browserCore.DeepSeekAdapter.extract();
+const deepSeekDomMarkdown = Markdown.buildMarkdown(deepSeekDomConversation);
+assert.equal(deepSeekDomConversation.conversationTime, "2026-04-15T09:00:00.000Z");
+assert.equal(deepSeekDomConversation.messages[1].content, "DeepSeek DOM final answer");
+assert.doesNotMatch(deepSeekDomMarkdown, /hidden thinking/);
+
+testNodeOrder = 0;
+const deepSeekFallbackRoot = element("main", {}, [
+  element("div", { class: "ds-virtual-list-visible-items" }, [
+    element("div", { "data-virtual-list-item-key": "1" }, [
+      element("div", { class: "user-message" }, [textNode("Fallback DOM question")])
+    ]),
+    element("div", { "data-virtual-list-item-key": "2" }, [
+      element("div", { class: "ds-message" }, [
+        element("div", { class: "ds-markdown" }, [
+          element("p", {}, [textNode("Fallback DOM answer")])
+        ])
+      ])
+    ])
+  ])
+]);
+const deepSeekFetchCalls = [];
+browserGlobal.document = documentFrom(deepSeekFallbackRoot, "DeepSeek API fallback - DeepSeek");
+browserGlobal.location = { href: "https://chat.deepseek.com/a/chat/s/deepseek-fallback-123456789" };
+browserGlobal.performance = {
+  getEntriesByType(type) {
+    return type === "resource"
+      ? [{ name: "https://chat.deepseek.com/api/v0/chat/history_messages?chat_session_id=deepseek-fallback-123456789" }]
+      : [];
+  }
+};
+browserGlobal.localStorage = {
+  getItem(key) {
+    return key === "userToken" ? JSON.stringify({ value: "deepseek-test-token" }) : null;
+  }
+};
+browserGlobal.fetch = (url, init = {}) => {
+  deepSeekFetchCalls.push({ url, init });
+  if (init.method || !String(url || "").includes("deepseek-fallback-123456789")) {
+    return Promise.resolve({ ok: false });
+  }
+
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      data: {
+        biz_data: {
+          chat_session: {
+            id: "deepseek-fallback-123456789",
+            title: "DeepSeek API fallback",
+            updated_at: 1776250803
+          },
+          chat_messages: [
+            { message_id: "fallback-user-1", role: "USER", inserted_at: 1776250801, content: "Fallback API question" },
+            { message_id: "fallback-assistant-1", role: "ASSISTANT", inserted_at: 1776250802, fragments: [{ type: "TEXT", text: "Fallback API answer" }] }
+          ]
+        }
+      }
+    })
+  });
+};
+browserCore.TimestampCache = {
+  getTimestamp() {
+    return "";
+  },
+  getCacheEntry() {
+    return null;
+  }
+};
+const deepSeekFallbackConversation = await browserCore.DeepSeekAdapter.extract();
+assert.equal(deepSeekFallbackConversation.conversationTime, "2026-04-15T11:00:01.000Z");
+assert.equal(deepSeekFallbackConversation.messages[0].time, "2026-04-15T11:00:01.000Z");
+assert.ok(deepSeekFetchCalls.some((call) => !call.init.method && String(call.url).includes("/api/v0/chat/history_messages")));
+assert.ok(!deepSeekFetchCalls.some((call) => call.init && call.init.method === "POST" && String(call.url).includes("/api/v0/chat/history_messages")));
+assert.ok(deepSeekFetchCalls.some((call) => call.init.headers && call.init.headers.Authorization === "Bearer deepseek-test-token"));
+delete browserGlobal.fetch;
+delete browserGlobal.performance;
+delete browserGlobal.localStorage;
+
+testNodeOrder = 0;
+const doubaoDomRoot = element("main", {}, [
+  element("div", { class: "inter-H_fm37" }, [
+    element("div", { class: "container-user" }, [textNode("Doubao DOM question")]),
+    element("div", { class: "container-assistant" }, [
+      element("div", { class: "flow-markdown-body" }, [
+        element("p", {}, [textNode("Doubao DOM answer")])
+      ])
+    ])
+  ])
+]);
+browserGlobal.document = documentFrom(doubaoDomRoot, "Doubao DOM - Doubao");
+browserGlobal.location = { href: "https://www.doubao.com/chat/doubao-time-123456789" };
+const doubaoDomConversation = await browserCore.DoubaoAdapter.extract();
+assert.equal(doubaoDomConversation.conversationTime, "2026-04-15T10:00:00.000Z");
+
+testNodeOrder = 0;
+const doubaoFallbackRoot = element("main", {}, [
+  element("div", { class: "inter-H_fm37" }, [
+    element("div", { class: "container-user" }, [textNode("Doubao fallback DOM question")]),
+    element("div", { class: "container-assistant" }, [
+      element("div", { class: "flow-markdown-body" }, [
+        element("p", {}, [textNode("Doubao fallback DOM answer")])
+      ])
+    ])
+  ])
+]);
+const doubaoFetchCalls = [];
+browserGlobal.document = documentFrom(doubaoFallbackRoot, "Doubao API fallback - Doubao");
+browserGlobal.location = { href: "https://www.doubao.com/chat/38421122577992706" };
+browserGlobal.performance = {
+  getEntriesByType(type) {
+    return type === "resource"
+      ? [{ name: "https://www.doubao.com/im/chain/recent_conv?version_code=20800&language=zh" }]
+      : [];
+  }
+};
+browserGlobal.fetch = (url, init = {}) => {
+  doubaoFetchCalls.push({ url, init });
+  if (init.method !== "POST" || !String(url || "").includes("/im/chain/recent_conv")) {
+    return Promise.resolve({ ok: false });
+  }
+
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      cmd: 3200,
+      status_code: 0,
+      downlink_body: {
+        pull_recent_conv_chain_downlink_body: {
+          cells: [
+            {
+              conversation: {
+                conversation_id: "38421122577992706",
+                name: "Doubao API fallback",
+                messages: [
+                  {
+                    conversation_id: "38421122577992706",
+                    message_id: "doubao-fallback-user-1",
+                    user_type: 1,
+                    create_time: "1776347817",
+                    content: JSON.stringify({ text: "Doubao API fallback question" })
+                  },
+                  {
+                    conversation_id: "38421122577992706",
+                    message_id: "doubao-fallback-assistant-1",
+                    user_type: 2,
+                    create_time: "1776347820",
+                    content: "",
+                    content_block: [
+                      {
+                        content: {
+                          text_block: {
+                            text: "Doubao API fallback answer"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    })
+  });
+};
+const doubaoFallbackConversation = await browserCore.DoubaoAdapter.extract();
+assert.equal(doubaoFallbackConversation.conversationTime, "2026-04-16T13:56:57.000Z");
+assert.equal(doubaoFallbackConversation.messages[0].time, "2026-04-16T13:56:57.000Z");
+assert.equal(doubaoFallbackConversation.messages[1].content, "Doubao fallback DOM answer");
+assert.ok(doubaoFetchCalls.some((call) => call.init.method === "POST" && call.init.body && call.init.body.includes("\"cmd\":3200")));
+delete browserGlobal.fetch;
+delete browserGlobal.performance;
+
 const geminiJsonInterceptorMessages = await collectInterceptorMessages(
   "https://gemini.google.com/_/BardChatUi/data/batchexecute",
   [
@@ -672,6 +1355,12 @@ assert.deepEqual(
     "assistant:Second answer:2025-11-15T09:11:17.500Z"
   ]
 );
+const geminiDebugMessage = geminiTextInterceptorMessages.find((message) => message.type === "AI_CHAT_EXPORTER_GEMINI_DEBUG");
+const geminiDebugEvidence = geminiDebugMessage.evidence.ids.find((item) => item.conversationId === "abc123456789");
+assert.equal(geminiDebugMessage.evidence.platform, "Gemini");
+assert.equal(geminiDebugMessage.evidence.rpcid, "hNvQHb");
+assert.ok(geminiDebugEvidence.hitCount >= 1);
+assert.ok(geminiDebugEvidence.timestampCandidates.some((candidate) => candidate.timestamp === "2025-11-15T09:09:37.522Z"));
 
 const geminiHistoryRpc = [
   null,
@@ -745,6 +1434,22 @@ assert.match(chatgptMarkdown, /platform: "ChatGPT"/);
 assert.match(chatgptMarkdown, /conversation_time: "2025-11-15T09:09:37\.522Z"/);
 assert.match(chatgptMarkdown, /_Time: 2025-11-15T09:09:37\.522Z_/);
 assert.equal(chatgptFilename, "2025-11-15_ChatGPT_3D打印自行车可行性.md");
+
+const genericGeminiConversation = {
+  platform: "Gemini",
+  sourceUrl: "https://gemini.google.com/app/geminigenerictitle123",
+  title: "与 Gemini 对话",
+  conversationId: "geminigenerictitle123",
+  conversationTime: "2026-03-19T08:00:00.000Z",
+  messages: [
+    { role: "user", content: "环路积分符号怎么理解？" },
+    { role: "assistant", content: "它表示沿封闭路径积分。" }
+  ]
+};
+const genericGeminiMarkdown = Markdown.buildMarkdown(genericGeminiConversation);
+assert.equal(Markdown.buildFilename(genericGeminiConversation), "2026-03-19_Gemini_环路积分符号怎么理解.md");
+assert.match(genericGeminiMarkdown, /^# 环路积分符号怎么理解？/m);
+assert.doesNotMatch(genericGeminiMarkdown, /conversation_title: "与 Gemini 对话"/);
 
 for (const conversation of conversations) {
   const body = Markdown.buildMarkdown(conversation);

@@ -21,22 +21,18 @@
         <button id="exportButton" type="button" disabled>开始导出</button>
         <button id="cancelButton" class="secondary" type="button" disabled>取消</button>
         <button id="clearButton" class="secondary" type="button">清空本次队列</button>
-        <button id="clearRegistryButton" class="secondary" type="button">清空备份记录</button>
+        <button id="clearRegistryButton" class="secondary" type="button">清空兼容记录</button>
       </section>
 
-      <label class="option">
-        <input id="skipSucceeded" type="checkbox" checked>
-        跳过已备份或已成功导出的聊天
-      </label>
-
-      <p id="status" class="status" role="status">先在 ChatGPT、Claude、Gemini 或 Grok 页面打开本控制台，然后扫描历史列表。长期备份记录会跨标签页保留。</p>
+      <p id="status" class="status" role="status">先在 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包页面打开本控制台，然后扫描历史列表。扫描时会优先按 Markdown 元数据里的 conversation_id 去重，并对比 /Users/mayifan/Downloads/AI Chat Exports 下已导出的文件。</p>
 
       <section class="summary" aria-label="导出统计">
         <span id="totalCount">总数 0</span>
         <span id="queuedCount">待导出 0</span>
         <span id="successCount">成功 0</span>
+        <span id="skippedCount">跳过 0</span>
         <span id="failedCount">失败 0</span>
-        <span id="registryCount">备份记录 0</span>
+        <span id="registryCount">兼容记录 0</span>
       </section>
 
       <ol id="queue" class="queue" aria-label="聊天导出队列"></ol>

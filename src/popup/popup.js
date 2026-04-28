@@ -10,6 +10,8 @@
     "src/content/adapters/chatgpt.js",
     "src/content/adapters/gemini.js",
     "src/content/adapters/grok.js",
+    "src/content/adapters/deepseek.js",
+    "src/content/adapters/doubao.js",
     "src/content/adapters/claude.js",
     "src/content/history-discovery.js",
     "src/content/content.js"
@@ -27,7 +29,12 @@
     "https://grok.com/*",
     "https://*.grok.com/*",
     "https://x.com/i/grok*",
-    "https://grok.x.ai/*"
+    "https://grok.x.ai/*",
+    "https://chat.deepseek.com/*",
+    "https://deepseek.com/*",
+    "https://*.deepseek.com/*",
+    "https://doubao.com/*",
+    "https://*.doubao.com/*"
   ];
 
   const platformElement = document.getElementById("platform");
@@ -56,6 +63,14 @@
 
       if (host === "grok.com" || host.endsWith(".grok.com") || host === "grok.x.ai" || (host === "x.com" && path.startsWith("/i/grok"))) {
         return "Grok";
+      }
+
+      if (host === "chat.deepseek.com" || host === "deepseek.com" || host.endsWith(".deepseek.com")) {
+        return "DeepSeek";
+      }
+
+      if (host === "doubao.com" || host.endsWith(".doubao.com")) {
+        return "Doubao";
       }
     } catch (_error) {
       return "";
@@ -236,6 +251,7 @@
           targetConversationId: conversationId,
           maxRounds: 220,
           idleLimit: 8,
+          geminiPreloadSidebar: false,
           geminiSearchMaxRounds: 120,
           geminiSearchIdleLimit: 4,
           geminiSearchRoundDelayMs: 220
@@ -317,7 +333,7 @@
     const platform = tab && tab.url ? detectPlatform(tab.url) : "";
 
     if (!platform) {
-      platformElement.textContent = "当前页面暂不支持。请打开 ChatGPT、Claude、Gemini 或 Grok 的聊天页。";
+      platformElement.textContent = "当前页面暂不支持。请打开 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包的聊天页。";
       exportButton.disabled = true;
       batchButton.disabled = true;
       debugButton.disabled = true;

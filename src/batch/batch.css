@@ -33,8 +33,7 @@ h1 {
 
 .eyebrow,
 .source,
-.status,
-.option {
+.status {
   color: color-mix(in srgb, CanvasText 68%, Canvas);
   font-size: 14px;
   line-height: 1.45;
@@ -79,13 +78,6 @@ button.secondary {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.option {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
 }
 
 .status {
@@ -143,6 +135,20 @@ button:disabled {
   white-space: nowrap;
 }
 
+.url a {
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  text-overflow: ellipsis;
+}
+
+.url a:hover,
+.url a:focus-visible {
+  color: CanvasText;
+  text-decoration: underline;
+}
+
 .status-pill {
   border-radius: 8px;
   padding: 4px 8px;
@@ -163,6 +169,11 @@ button:disabled {
 
 .running .status-pill {
   background: #0b57d0;
+  color: #fff;
+}
+
+.skipped .status-pill {
+  background: #6f5b00;
   color: #fff;
 }
 

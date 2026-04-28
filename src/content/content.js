@@ -20,7 +20,9 @@
       chatgpt: namespace.ChatGPTAdapter,
       claude: namespace.ClaudeAdapter,
       gemini: namespace.GeminiAdapter,
-      grok: namespace.GrokAdapter
+      grok: namespace.GrokAdapter,
+      deepseek: namespace.DeepSeekAdapter,
+      doubao: namespace.DoubaoAdapter
     };
 
     return { platform, adapter: adapters[platform.id] || null };
@@ -44,11 +46,11 @@
   function applyConversationOverrides(conversation, overrides = {}) {
     const copy = { ...conversation };
 
-    if (overrides.title && !copy.title) {
+    if (shouldUseTitleOverride(copy.title, overrides.title, copy.platform)) {
       copy.title = overrides.title;
     }
 
-    if (overrides.conversationTime) {
+    if (overrides.conversationTime && shouldUseConversationTimeOverride(copy.conversationTime, overrides.conversationTime)) {
       copy.conversationTime = overrides.conversationTime;
     }
 
@@ -59,12 +61,58 @@
     return copy;
   }
 
+  function titleSpecificityScore(value, platformLabel = "") {
+    const clean = utils.normalizeWhitespace(value);
+    if (!clean) {
+      return 0;
+    }
+
+    if (utils.isGenericConversationTitle(clean, platformLabel)) {
+      return 1;
+    }
+
+    return Math.min(clean.length, 160);
+  }
+
+  function shouldUseTitleOverride(existing, override, platformLabel = "") {
+    if (!override) {
+      return false;
+    }
+
+    if (!existing) {
+      return true;
+    }
+
+    return titleSpecificityScore(override, platformLabel) > titleSpecificityScore(existing, platformLabel);
+  }
+
+  function timePrecisionScore(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return 0;
+    }
+
+    return /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text) ? 2 : 1;
+  }
+
+  function shouldUseConversationTimeOverride(existing, override) {
+    if (!override) {
+      return false;
+    }
+
+    if (!existing) {
+      return true;
+    }
+
+    return timePrecisionScore(override) > timePrecisionScore(existing);
+  }
+
   async function exportCurrentChat(overrides = {}) {
     const { platform, adapter } = currentAdapter();
     if (!platform || !adapter) {
       return {
         ok: false,
-        error: "当前页面不是已支持的 ChatGPT、Claude、Gemini 或 Grok 聊天页。"
+        error: "当前页面不是已支持的 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包聊天页。"
       };
     }
 
