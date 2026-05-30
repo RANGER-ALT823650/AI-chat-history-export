@@ -108,6 +108,12 @@
     ["zsh", "bash"]
   ]);
 
+  const UNRESOLVED_MEDIA_PATTERNS = [
+    /\[(?:image|img|media|file|attachment):[^\]]*]/i
+  ];
+
+  const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\(([^)]+)\)/g;
+
   const TEX_SYMBOLS = new Map([
     ["\\oint", "∮"],
     ["\\int", "∫"],
@@ -785,23 +791,34 @@
 
   function buildFrontMatter(conversation) {
     const fields = [
+      ["status", "raw", "plain"],
+      ["needs_media", conversationNeedsMedia(conversation), "boolean"],
       ["platform", conversation.platform],
       ["source_url", conversation.sourceUrl],
       ["conversation_title", conversation.title],
       ["conversation_time", conversation.conversationTime],
       ["conversation_id", conversation.conversationId]
-    ].filter(([, value]) => value);
+    ].filter(([, value, type]) => type === "boolean" || value);
 
     if (!fields.length) {
       return "";
     }
 
-    const lines = fields.map(([key, value]) => `${key}: "${escapeYaml(value)}"`);
+    const lines = fields.map(([key, value, type]) => {
+      if (type === "plain") {
+        return `${key}: ${value}`;
+      }
+      if (type === "boolean") {
+        return `${key}: ${value ? "true" : "false"}`;
+      }
+      return `${key}: "${escapeYaml(value)}"`;
+    });
     return `---\n${lines.join("\n")}\n---\n\n`;
   }
 
   function buildMetadataSection(conversation) {
     const rows = [
+      ["Needs media", conversationNeedsMedia(conversation) ? "true" : "false"],
       ["Platform", conversation.platform],
       ["Source URL", conversation.sourceUrl],
       ["Conversation time", conversation.conversationTime],
@@ -813,6 +830,110 @@
     }
 
     return `## Metadata\n\n${rows.map(([key, value]) => `- ${key}: ${value}`).join("\n")}\n\n`;
+  }
+
+  function booleanOverride(value) {
+    if (value === true || value === false) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") {
+        return true;
+      }
+      if (normalized === "false") {
+        return false;
+      }
+    }
+
+    return null;
+  }
+
+  function attachmentHasLocalMedia(attachment) {
+    if (!attachment || typeof attachment !== "object") {
+      return false;
+    }
+
+    if (attachment.exported === true || attachment.downloaded === true) {
+      return true;
+    }
+
+    return Boolean(
+      attachment.localPath ||
+      attachment.local_path ||
+      attachment.relativePath ||
+      attachment.relative_path ||
+      attachment.path
+    );
+  }
+
+  function attachmentNeedsMedia(attachment) {
+    const override = booleanOverride(attachment && attachment.needsMedia);
+    if (override !== null) {
+      return override;
+    }
+
+    const type = String(
+      (attachment && (attachment.type || attachment.kind || attachment.mimeType || attachment.mime_type)) || ""
+    ).toLowerCase();
+    const looksLikeMedia = /image|video|audio|file|attachment|pdf|spreadsheet|document/.test(type);
+
+    return looksLikeMedia && !attachmentHasLocalMedia(attachment);
+  }
+
+  function textNeedsMedia(value) {
+    const text = String(value || "");
+    if (UNRESOLVED_MEDIA_PATTERNS.some((pattern) => pattern.test(text))) {
+      return true;
+    }
+
+    MARKDOWN_IMAGE_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = MARKDOWN_IMAGE_PATTERN.exec(text))) {
+      if (!isLocalMediaReference(match[1])) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function isLocalMediaReference(value) {
+    const href = String(value || "").trim().replace(/^<|>$/g, "");
+    if (!href) {
+      return false;
+    }
+
+    return !/^(?:https?:|blob:|file-service:|attachment:)/i.test(href);
+  }
+
+  function messageNeedsMedia(message) {
+    const override = booleanOverride(message && message.needsMedia);
+    if (override !== null) {
+      return override;
+    }
+
+    const attachments = Array.isArray(message && message.attachments) ? message.attachments : [];
+    if (attachments.some(attachmentNeedsMedia)) {
+      return true;
+    }
+
+    return textNeedsMedia((message && (message.markdown || message.content)) || "");
+  }
+
+  function conversationNeedsMedia(conversation) {
+    const override = booleanOverride(conversation && conversation.needsMedia);
+    if (override !== null) {
+      return override;
+    }
+
+    const attachments = Array.isArray(conversation && conversation.attachments) ? conversation.attachments : [];
+    if (attachments.some(attachmentNeedsMedia)) {
+      return true;
+    }
+
+    return ((conversation && conversation.messages) || []).some(messageNeedsMedia);
   }
 
   function normalizeRole(role) {

@@ -9,7 +9,8 @@
     gemini: "Gemini",
     grok: "Grok",
     deepseek: "DeepSeek",
-    doubao: "Doubao"
+    doubao: "Doubao",
+    qwen: "Qwen"
   };
 
   function normalizeWhitespace(value) {
@@ -63,6 +64,19 @@
       return { id: "doubao", label: PLATFORM_LABELS.doubao };
     }
 
+    if (
+      hostname === "qwen.ai" ||
+      hostname.endsWith(".qwen.ai") ||
+      hostname === "qwenlm.ai" ||
+      hostname.endsWith(".qwenlm.ai") ||
+      hostname === "qianwen.com" ||
+      hostname.endsWith(".qianwen.com") ||
+      hostname === "tongyi.aliyun.com" ||
+      hostname === "qianwen.aliyun.com"
+    ) {
+      return { id: "qwen", label: PLATFORM_LABELS.qwen };
+    }
+
     return null;
   }
 
@@ -72,7 +86,7 @@
       return "";
     }
 
-    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "豆包", "Google Gemini"];
+    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "豆包", "Qwen", "通义千问", "千问", "Google Gemini"];
     for (const label of labels) {
       clean = clean
         .replace(new RegExp(`\\s*[|-]\\s*${escapeRegExp(label)}\\s*$`, "i"), "")
@@ -94,7 +108,7 @@
     const stripped = stripPlatformFromTitle(clean, platformLabel);
     const normalized = normalizeWhitespace(stripped || clean).toLowerCase();
     const compact = normalized.replace(/\s+/g, "");
-    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "豆包", "Google Gemini"]
+    const labels = [platformLabel, "ChatGPT", "OpenAI", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "豆包", "Qwen", "通义千问", "千问", "Google Gemini"]
       .map((label) => normalizeWhitespace(label).toLowerCase())
       .filter(Boolean);
 
@@ -114,6 +128,8 @@
       /^recent(?: chats| conversations)?$/i,
       /^与\s*(?:google\s*)?gemini\s*对话$/i,
       /^和\s*(?:google\s*)?gemini\s*聊天$/i,
+      /^与\s*(?:qwen|通义千问|千问)\s*对话$/i,
+      /^和\s*(?:qwen|通义千问|千问)\s*聊天$/i,
       /^新(建)?(聊天|对话)$/,
       /^未命名(聊天|对话)?$/,
       /^无标题(聊天|对话)?$/

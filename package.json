@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "refresh:export-index": "node scripts/generate-exported-index.mjs",
     "test": "node tests/run-tests.mjs",
     "build": "node scripts/build.mjs",
     "check:exports": "node scripts/check-exported-files.mjs",

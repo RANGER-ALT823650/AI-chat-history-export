@@ -12,6 +12,7 @@
     "src/content/adapters/grok.js",
     "src/content/adapters/deepseek.js",
     "src/content/adapters/doubao.js",
+    "src/content/adapters/qwen.js",
     "src/content/adapters/claude.js",
     "src/content/history-discovery.js",
     "src/content/content.js"
@@ -21,11 +22,14 @@
   ];
   const STORAGE_KEY = "aiChatExporterBatchState";
   const REGISTRY_KEY = "aiChatExporterExportRegistry";
-  const EXPORTED_MARKDOWN_ROOT = "/Users/mayifan/Downloads/AI Chat Exports";
+  const DEFAULT_EXPORT_ROOT_LABEL = "未设置导出目录";
+  const exportPath = window.AIChatExporterExportPath;
   const params = new URLSearchParams(window.location.search);
   const sourceTabId = Number(params.get("sourceTabId"));
 
   const sourceElement = document.getElementById("source");
+  const exportPathElement = document.getElementById("exportPath");
+  const choosePathButton = document.getElementById("choosePathButton");
   const statusElement = document.getElementById("status");
   const discoverButton = document.getElementById("discoverButton");
   const exportButton = document.getElementById("exportButton");
@@ -53,22 +57,28 @@
     items: {}
   };
   let exportedFileIndex = {
-    root: EXPORTED_MARKDOWN_ROOT,
+    root: DEFAULT_EXPORT_ROOT_LABEL,
     files: [],
     identityKeys: new Set(),
     sourceUrlKeys: new Set(),
-    filenameKeys: new Set()
+    filenameKeys: new Set(),
+    sources: {
+      downloads: 0,
+      registry: 0,
+      snapshot: 0
+    }
   };
   let cancelRequested = false;
   let running = false;
+  let exportDirectoryReady = false;
 
   function setStatus(value) {
     statusElement.textContent = value;
   }
 
-  function statusLabel(status) {
+  function statusLabel(status, needsUpdateCheck) {
     const labels = {
-      queued: "待导出",
+      queued: needsUpdateCheck ? "待检查更新" : "待导出",
       running: "正在导出",
       succeeded: "成功",
       failed: "失败",
@@ -217,6 +227,18 @@
       if (hostname === "doubao.com" || hostname.endsWith(".doubao.com")) {
         return "Doubao";
       }
+      if (
+        hostname === "qwen.ai" ||
+        hostname.endsWith(".qwen.ai") ||
+        hostname === "qwenlm.ai" ||
+        hostname.endsWith(".qwenlm.ai") ||
+        hostname === "qianwen.com" ||
+        hostname.endsWith(".qianwen.com") ||
+        hostname === "tongyi.aliyun.com" ||
+        hostname === "qianwen.aliyun.com"
+      ) {
+        return "Qwen";
+      }
     } catch (_error) {
       // Keep the caller-provided platform fallback.
     }
@@ -246,7 +268,7 @@
     return metadata.platform || file.platformFolder || platformLabelFromUrl(metadata.sourceUrl || "");
   }
 
-  function buildExportedFileIndex(files, root = EXPORTED_MARKDOWN_ROOT) {
+  function buildExportedFileIndex(files, root = DEFAULT_EXPORT_ROOT_LABEL, sources = {}) {
     const identityKeys = new Set();
     const sourceUrlKeys = new Set();
     const filenameKeys = new Set();
@@ -273,7 +295,12 @@
       files: files || [],
       identityKeys,
       sourceUrlKeys,
-      filenameKeys
+      filenameKeys,
+      sources: {
+        downloads: sources.downloads || 0,
+        registry: sources.registry || 0,
+        snapshot: sources.snapshot || 0
+      }
     };
   }
 
@@ -283,8 +310,43 @@
       throw new Error((response && response.error) || "无法读取已导出的文件记录。");
     }
 
-    exportedFileIndex = buildExportedFileIndex(response.files || [], response.root || EXPORTED_MARKDOWN_ROOT);
+    exportedFileIndex = buildExportedFileIndex(response.files || [], response.root || DEFAULT_EXPORT_ROOT_LABEL, response.sources || {});
     return exportedFileIndex;
+  }
+
+  async function refreshExportPathStatus() {
+    if (!exportPath || !exportPath.isSupported()) {
+      exportPathElement.textContent = "导出目录：当前浏览器不支持自由选择本地目录，请使用新版 Chrome 或 Edge。";
+      choosePathButton.disabled = true;
+      return false;
+    }
+
+    const label = await exportPath.exportRootLabel();
+    const hasDirectory = await exportPath.hasExportDirectory();
+    exportDirectoryReady = hasDirectory;
+    exportPathElement.textContent = hasDirectory
+      ? `导出目录：${label}`
+      : "导出目录：未设置，首次扫描或导出前请选择。";
+    choosePathButton.disabled = false;
+    return hasDirectory;
+  }
+
+  async function ensureExportDirectory() {
+    if (!exportPath || !exportPath.isSupported()) {
+      throw new Error("当前浏览器不支持自由选择本地导出目录，请使用新版 Chrome 或 Edge。");
+    }
+
+    if (!exportDirectoryReady) {
+      await exportPath.pickExportDirectory();
+      await refreshExportPathStatus();
+      return;
+    }
+
+    if (!(await exportPath.hasExportDirectory())) {
+      exportDirectoryReady = false;
+      await refreshExportPathStatus();
+      throw new Error("导出目录权限已失效，请点击“选择导出目录”重新授权。");
+    }
   }
 
   function candidateExportKeys(item, platformFallback = "") {
@@ -315,21 +377,34 @@
     const platform = item.platform || platformFallback || state.platform || "";
     const identity = identityKey(platform, item.conversationId);
     if (identity && exportedFileIndex.identityKeys.has(identity)) {
-      return { key: identity, rule: "conversation_id" };
+      const registryRecord = registryRecordFor(item, platformFallback);
+      return { key: identity, rule: "conversation_id", messageCount: registryRecord ? registryRecord.messageCount : 0 };
     }
 
     const source = sourceUrlKey(platform, item.sourceUrl || item.url);
     if (source && exportedFileIndex.sourceUrlKeys.has(source)) {
-      return { key: source, rule: "source_url" };
+      const registryRecord = registryRecordFor(item, platformFallback);
+      return { key: source, rule: "source_url", messageCount: registryRecord ? registryRecord.messageCount : 0 };
     }
 
     for (const key of candidateExportKeys(item, platformFallback)) {
       if (exportedFileIndex.filenameKeys.has(key)) {
-        return { key, rule: "filename" };
+        const registryRecord = registryRecordFor(item, platformFallback);
+        return { key, rule: "filename", messageCount: registryRecord ? registryRecord.messageCount : 0 };
       }
     }
 
     return null;
+  }
+
+  function queueIdentityKey(item, platformFallback = "") {
+    const platform = item && (item.platform || platformFallback || state.platform || "");
+    const identity = identityKey(platform, item && item.conversationId);
+    if (identity) {
+      return identity;
+    }
+
+    return sourceUrlKey(platform, item && (item.sourceUrl || item.url));
   }
 
   function rememberExportedFileCandidate(item, platformFallback = "") {
@@ -365,15 +440,20 @@
   }
 
   function rememberExportedItem(item, result = {}) {
-    const key = registryKey(item, result.platform || item.platform || state.platform);
+    const exportedItem = {
+      ...item,
+      conversationId: item.conversationId || result.conversationId || "",
+      url: item.url || result.sourceUrl || ""
+    };
+    const key = registryKey(exportedItem, result.platform || item.platform || state.platform);
     if (!key) {
       return false;
     }
 
     exportRegistry.items[key] = {
       platform: result.platform || item.platform || state.platform || "",
-      conversationId: item.conversationId || result.conversationId || "",
-      url: item.url || "",
+      conversationId: exportedItem.conversationId,
+      url: exportedItem.url,
       title: item.title || result.title || "",
       conversationTime: item.conversationTime || result.conversationTime || "",
       rawDateText: item.rawDateText || "",
@@ -407,7 +487,8 @@
     const succeeded = state.items.filter((item) => item.status === "succeeded").length;
     const skipped = state.items.filter((item) => item.status === "skipped").length;
     const failed = state.items.filter((item) => item.status === "failed").length;
-    return { total, queued, succeeded, skipped, failed, registry: registryCount() };
+    const needsUpdateCheck = state.items.filter((item) => item.needsUpdateCheck && item.status === "queued").length;
+    return { total, queued, succeeded, skipped, failed, needsUpdateCheck, registry: registryCount() };
   }
 
   function render() {
@@ -418,6 +499,12 @@
     skippedCountElement.textContent = `跳过 ${summary.skipped}`;
     failedCountElement.textContent = `失败 ${summary.failed}`;
     registryCountElement.textContent = `兼容记录 ${summary.registry}`;
+
+    // 显示待检查更新的数量
+    if (summary.needsUpdateCheck > 0) {
+      queuedCountElement.textContent += `（${summary.needsUpdateCheck} 条待检查更新）`;
+    }
+
     exportButton.disabled = running || !state.items.length;
     cancelButton.disabled = !running;
     clearRegistryButton.disabled = running || (!summary.registry && !state.items.length);
@@ -431,7 +518,7 @@
 
       const pill = document.createElement("span");
       pill.className = "status-pill";
-      pill.textContent = statusLabel(item.status);
+      pill.textContent = statusLabel(item.status, item.needsUpdateCheck);
 
       const body = document.createElement("div");
       const title = document.createElement("div");
@@ -456,9 +543,11 @@
       if (item.status === "failed") {
         meta.textContent = item.error || "导出失败";
       } else if (item.status === "skipped") {
-        meta.textContent = "已存在于导出目录";
+        meta.textContent = item.error === "无新消息" ? "无新消息，跳过" : "已存在于导出目录";
       } else if (item.status === "succeeded") {
         meta.textContent = `${item.messageCount || 0} 条消息`;
+      } else if (item.needsUpdateCheck && item.status === "queued") {
+        meta.textContent = `已导出 ${item.previousMessageCount || 0} 条消息，检查更新`;
       } else {
         meta.textContent = item.conversationId || item.platform || "";
       }
@@ -529,7 +618,7 @@
 
   async function getSourceTab() {
     if (!sourceTabId) {
-      throw new Error("缺少来源标签页。请从 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包页面重新打开批量导出。");
+      throw new Error("缺少来源标签页。请从 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问页面重新打开批量导出。");
     }
 
     const tab = await chrome.tabs.get(sourceTabId).catch(() => null);
@@ -542,9 +631,11 @@
 
   function mergeDiscovered(conversations, platform, sourceUrl) {
     const previous = new Map(state.items.map((item) => [item.url, item]));
+    const queuedKeys = new Set();
     state.platform = platform || state.platform;
     state.sourceUrl = sourceUrl || state.sourceUrl;
     let skippedExistingFiles = 0;
+    let queuedForUpdateCheck = 0;
     state.items = conversations.reduce((items, item) => {
       const old = previous.get(item.url);
       const candidate = {
@@ -556,15 +647,49 @@
       const exportedFile = state.forceReexportExistingFiles
         ? null
         : exportedFileRecordFor(candidate, item.platform || platform);
-      if (exportedFile) {
-        skippedExistingFiles += 1;
+      if (exportedFile && !state.forceReexportExistingFiles) {
+        // 已导出的聊天加入队列，标记为"待检查更新"
+        const queuedKey = queueIdentityKey(candidate, item.platform || platform);
+        if (queuedKey && queuedKeys.has(queuedKey)) {
+          skippedExistingFiles += 1;
+          return items;
+        }
+        if (queuedKey) {
+          queuedKeys.add(queuedKey);
+        }
+
+        queuedForUpdateCheck += 1;
+        const merged = {
+          ...item,
+          platform: item.platform || platform,
+          status: "queued",
+          needsUpdateCheck: true,
+          previousMessageCount: exportedFile.messageCount || 0,
+          filename: old && old.filename || candidate.filename,
+          messageCount: old && old.messageCount,
+          conversationTime: item.conversationTime || (old && old.conversationTime) || "",
+          rawDateText: item.rawDateText || (old && old.rawDateText) || "",
+          title: item.title || (old && old.title) || "",
+          error: ""
+        };
+        items.push(merged);
         return items;
+      }
+
+      const queuedKey = queueIdentityKey(candidate, item.platform || platform);
+      if (queuedKey && queuedKeys.has(queuedKey)) {
+        return items;
+      }
+      if (queuedKey) {
+        queuedKeys.add(queuedKey);
       }
 
       const merged = {
         ...item,
         platform: item.platform || platform,
         status: "queued",
+        needsUpdateCheck: false,
+        previousMessageCount: 0,
         filename: old && old.filename,
         messageCount: old && old.messageCount,
         conversationTime: item.conversationTime || (old && old.conversationTime) || "",
@@ -584,6 +709,7 @@
     return {
       discovered: conversations.length,
       skippedExistingFiles,
+      queuedForUpdateCheck,
       queued: state.items.length
     };
   }
@@ -597,6 +723,7 @@
     render();
 
     try {
+      await ensureExportDirectory();
       const tab = await getSourceTab();
       await loadRegistry();
       await loadExportedFileIndex();
@@ -624,7 +751,10 @@
       if (state.forceReexportExistingFiles) {
         setStatus(`扫描完成，发现 ${summary.discovered} 条聊天。已开启重新导出模式，本轮保留全部聊天，待导出 ${summary.queued} 条。`);
       } else {
-        setStatus(`扫描完成，发现 ${summary.discovered} 条聊天；已按 ${exportedFileIndex.root} 去重 ${summary.skippedExistingFiles} 条，本轮待导出 ${summary.queued} 条。`);
+        const updateCheckInfo = summary.queuedForUpdateCheck > 0
+          ? `，其中 ${summary.queuedForUpdateCheck} 条将检查是否有新消息`
+          : '';
+        setStatus(`扫描完成，发现 ${summary.discovered} 条聊天；已读取 ${exportedFileIndex.files.length} 个已导出文件（下载记录 ${exportedFileIndex.sources.downloads}，导出记录 ${exportedFileIndex.sources.registry}，本地快照 ${exportedFileIndex.sources.snapshot}），按 ${exportedFileIndex.root} 去重 ${summary.skippedExistingFiles} 条${updateCheckInfo}，本轮待导出 ${summary.queued} 条。`);
       }
     } catch (error) {
       setStatus(error && error.message ? error.message : String(error));
@@ -698,19 +828,25 @@
     return workTabId;
   }
 
-  async function downloadMarkdown(result, platform) {
-    const download = await chrome.runtime.sendMessage({
-      type: "DOWNLOAD_MARKDOWN",
+  async function downloadMarkdown(result, platform, overwrite = false) {
+    await ensureExportDirectory();
+    const written = await exportPath.writeMarkdownFile({
+      platform: platform || result.platform || "AI",
       filename: result.filename,
       markdown: result.markdown,
-      folder: `AI Chat Exports/${platform || result.platform || "AI"}`
+      conflictAction: overwrite ? "overwrite" : "uniquify",
+      title: result.title || "",
+      sourceUrl: result.sourceUrl || "",
+      conversationId: result.conversationId || "",
+      conversationTime: result.conversationTime || "",
+      messageCount: result.messageCount || 0
     });
 
-    if (!download || !download.ok) {
-      throw new Error((download && download.error) || "下载失败。");
+    if (!written || !written.ok) {
+      throw new Error((written && written.error) || "写入 Markdown 失败。");
     }
 
-    return download;
+    return written;
   }
 
   async function markExported(item, result) {
@@ -749,20 +885,55 @@
       throw new Error((result && result.error) || "导出失败。");
     }
 
+    // 智能更新检测：如果标记为待检查更新，对比消息数量
+    if (item.needsUpdateCheck && !state.forceReexportExistingFiles) {
+      const currentMessageCount = result.messageCount || 0;
+      const previousMessageCount = item.previousMessageCount || 0;
+
+      // 如果当前消息数量 <= 已记录数量，说明没有新消息，跳过
+      if (currentMessageCount <= previousMessageCount) {
+        return {
+          ...result,
+          skippedNoNewMessages: true,
+          messageCount: currentMessageCount
+        };
+      }
+    }
+
     const finalCandidate = {
       ...item,
       platform: result.platform || item.platform || state.platform,
+      title: result.title || item.title || "",
+      sourceUrl: result.sourceUrl || item.sourceUrl || item.url || "",
+      conversationId: result.conversationId || item.conversationId || "",
       filename: result.filename,
       conversationTime: result.conversationTime || item.conversationTime || ""
     };
     if (!state.forceReexportExistingFiles && exportedFileRecordFor(finalCandidate, finalCandidate.platform)) {
-      return {
-        ...result,
-        skippedExistingFile: true
-      };
+      // 再次检查是否需要更新（基于消息数量）
+      if (item.needsUpdateCheck) {
+        const currentMessageCount = result.messageCount || 0;
+        const previousMessageCount = item.previousMessageCount || 0;
+        if (currentMessageCount > previousMessageCount) {
+          // 有新消息，继续导出
+        } else {
+          return {
+            ...result,
+            skippedNoNewMessages: true,
+            messageCount: currentMessageCount
+          };
+        }
+      } else {
+        return {
+          ...result,
+          skippedExistingFile: true
+        };
+      }
     }
 
-    await downloadMarkdown(result, item.platform || state.platform);
+    // 更新导出时覆盖旧文件
+    const isUpdate = item.needsUpdateCheck && result.messageCount > (item.previousMessageCount || 0);
+    await downloadMarkdown(result, item.platform || state.platform, isUpdate);
     rememberExportedFileCandidate(finalCandidate, finalCandidate.platform);
     return result;
   }
@@ -795,6 +966,7 @@
     let workTabId = null;
 
     try {
+      await ensureExportDirectory();
       await loadRegistry();
       await loadExportedFileIndex();
       discoverButton.disabled = true;
@@ -821,12 +993,21 @@
         try {
           workTabId = await createOrNavigateWorkTab(workTabId, item);
           const exported = await exportCurrentFromTabWithRetry(workTabId, item);
-          item.status = exported.skippedExistingFile ? "skipped" : "succeeded";
+
+          if (exported.skippedExistingFile || exported.skippedNoNewMessages) {
+            item.status = "skipped";
+            if (exported.skippedNoNewMessages) {
+              item.error = "无新消息";
+            }
+          } else {
+            item.status = "succeeded";
+          }
+
           item.filename = exported.filename;
           item.messageCount = exported.messageCount;
           item.platform = exported.platform || item.platform;
           item.conversationTime = item.conversationTime || exported.conversationTime || "";
-          if (!exported.skippedExistingFile) {
+          if (!exported.skippedExistingFile && !exported.skippedNoNewMessages) {
             await markExported(item, exported);
           }
         } catch (error) {
@@ -881,7 +1062,7 @@
       return;
     }
 
-    if (!window.confirm("确定清空兼容记录并允许当前队列全部重新导出吗？已存在的导出文件不会被删除，重新下载时浏览器可能生成带序号的新文件。")) {
+    if (!window.confirm("确定清空兼容记录并允许当前队列全部重新导出吗？已存在的导出文件不会被删除，重新导出时可能生成带序号的新文件。")) {
       return;
     }
 
@@ -896,7 +1077,7 @@
     }));
     state.forceReexportExistingFiles = true;
     await saveState();
-    setStatus("已清空兼容记录。当前队列已全部改为待导出，下一次开始导出会重新下载所有聊天。");
+    setStatus("已清空兼容记录。当前队列已全部改为待导出，下一次开始导出会重新写入所有聊天。");
     render();
   }
 
@@ -921,10 +1102,27 @@
     clearRegistry();
   });
 
+  choosePathButton.addEventListener("click", async () => {
+    choosePathButton.disabled = true;
+    setStatus("请选择 Markdown 导出目录...");
+
+    try {
+      await exportPath.pickExportDirectory();
+      await refreshExportPathStatus();
+      await loadExportedFileIndex().catch(() => null);
+      setStatus("导出目录已保存。");
+    } catch (error) {
+      setStatus(error && error.message ? error.message : String(error));
+    } finally {
+      choosePathButton.disabled = false;
+    }
+  });
+
   async function initialize() {
     await loadState();
     await loadRegistry();
     await migrateSucceededStateToRegistry();
+    await refreshExportPathStatus();
     const tab = await getSourceTab();
     sourceElement.textContent = tab.url;
     state.sourceUrl = state.sourceUrl || tab.url;

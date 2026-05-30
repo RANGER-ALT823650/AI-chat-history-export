@@ -1,7 +1,10 @@
 (function () {
   "use strict";
 
-  const EXPORTED_MARKDOWN_ROOT = "/Users/mayifan/Downloads/AI Chat Exports";
+  const EXPORT_SETTINGS_KEY = "aiChatExporterSettings";
+  const EXPORT_REGISTRY_KEY = "aiChatExporterExportRegistry";
+  const DEFAULT_EXPORT_ROOT_LABEL = "未设置导出目录";
+  const PACKAGED_EXPORTED_INDEX_PATH = "src/exported-markdown-index.json";
 
   function toBase64Utf8(value) {
     const bytes = new TextEncoder().encode(value);
@@ -18,6 +21,30 @@
 
   function normalizePath(value) {
     return String(value || "").replace(/\\/g, "/");
+  }
+
+  function stripUnsafePathSegments(value) {
+    return normalizePath(value)
+      .split("/")
+      .map((part) => part.trim())
+      .filter((part) => part && part !== "." && part !== "..")
+      .join("/");
+  }
+
+  function downloadFilenamePath(folder, filename) {
+    let cleanFolder = normalizePath(folder || "");
+    const cleanFilename = stripUnsafePathSegments(filename || "AI_Chat.md").split("/").pop() || "AI_Chat.md";
+
+    const marker = "/AI Chat History/";
+    const markerIndex = cleanFolder.indexOf(marker);
+    if (markerIndex >= 0) {
+      cleanFolder = cleanFolder.slice(markerIndex + marker.length);
+    } else if (/^(?:\/|[A-Za-z]:\/)/.test(cleanFolder)) {
+      cleanFolder = cleanFolder.split("/").filter(Boolean).slice(-1).join("/");
+    }
+
+    cleanFolder = stripUnsafePathSegments(cleanFolder);
+    return cleanFolder ? `${cleanFolder}/${cleanFilename}` : cleanFilename;
   }
 
   function escapeRegExp(value) {
@@ -90,6 +117,8 @@
       target.conversationId = target.conversationId || cleanValue;
     } else if (normalizedKey === "conversation_title") {
       target.title = target.title || cleanValue;
+    } else if (normalizedKey === "needs_media") {
+      target.needsMedia = target.needsMedia || cleanValue;
     }
   }
 
@@ -126,7 +155,8 @@
       platform: "",
       sourceUrl: "",
       conversationId: "",
-      title: ""
+      title: "",
+      needsMedia: ""
     };
     if (!markdown) {
       return metadata;
@@ -156,18 +186,18 @@
     });
   }
 
-  function exportedMarkdownFile(downloadItem) {
+  function exportedMarkdownFile(downloadItem, root) {
     const filename = normalizePath(downloadItem && downloadItem.filename);
-    const root = normalizePath(EXPORTED_MARKDOWN_ROOT);
+    const cleanRoot = normalizePath(root);
     if (!filename || !filename.toLowerCase().endsWith(".md")) {
       return null;
     }
 
-    if (filename !== root && !filename.startsWith(`${root}/`)) {
+    if (!cleanRoot || filename === cleanRoot || !filename.startsWith(`${cleanRoot}/`)) {
       return null;
     }
 
-    const relativePath = filename.slice(root.length).replace(/^\/+/, "");
+    const relativePath = filename.slice(cleanRoot.length).replace(/^\/+/, "");
     if (!relativePath) {
       return null;
     }
@@ -183,36 +213,140 @@
     };
   }
 
+  function exportedMarkdownSnapshotFile(file, root = DEFAULT_EXPORT_ROOT_LABEL) {
+    const relativePath = normalizePath(file && file.relativePath);
+    const basename = normalizePath(file && file.basename);
+    const platformFolder = normalizePath(file && file.platformFolder);
+    if (!relativePath || !relativePath.toLowerCase().endsWith(".md")) {
+      return null;
+    }
+
+    const parts = relativePath.split("/").filter(Boolean);
+    return {
+      id: file.id || `snapshot:${relativePath}`,
+      filename: normalizePath(file.filename || `${root}/${relativePath}`),
+      relativePath,
+      basename: basename || parts[parts.length - 1] || relativePath,
+      platformFolder: platformFolder || (parts.length > 1 ? parts[0] : ""),
+      metadata: {
+        platform: "",
+        sourceUrl: "",
+        conversationId: "",
+        title: "",
+        needsMedia: "",
+        ...((file && file.metadata) || {})
+      }
+    };
+  }
+
+  async function loadPackagedExportedMarkdownFiles() {
+    if (!globalThis.fetch || !chrome.runtime.getURL) {
+      return [];
+    }
+
+    try {
+      const response = await fetch(chrome.runtime.getURL(PACKAGED_EXPORTED_INDEX_PATH), { cache: "no-store" });
+      if (!response || !response.ok) {
+        return [];
+      }
+
+      const payload = await response.json();
+      return (payload.files || [])
+        .map((file) => exportedMarkdownSnapshotFile(file))
+        .filter(Boolean);
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  async function loadExportSettings() {
+    const stored = await chrome.storage.local.get(EXPORT_SETTINGS_KEY).catch(() => ({}));
+    const settings = stored && stored[EXPORT_SETTINGS_KEY] && typeof stored[EXPORT_SETTINGS_KEY] === "object"
+      ? stored[EXPORT_SETTINGS_KEY]
+      : {};
+    return {
+      root: settings.exportRootLabel || settings.exportRootName || DEFAULT_EXPORT_ROOT_LABEL
+    };
+  }
+
+  function registryFileFromRecord(record, root) {
+    const platform = stripUnsafePathSegments(record && record.platform || "AI") || "AI";
+    const basename = stripUnsafePathSegments(record && record.filename || "AI_Chat.md").split("/").pop() || "AI_Chat.md";
+    const relativePath = normalizePath((record && record.relativePath) || `${platform}/${basename}`);
+
+    return exportedMarkdownSnapshotFile({
+      id: `registry:${platform}:${(record && (record.conversationId || record.url || relativePath)) || relativePath}`,
+      filename: `${root}/${relativePath}`,
+      relativePath,
+      basename,
+      platformFolder: platform,
+      metadata: {
+        platform,
+        sourceUrl: (record && record.url) || "",
+        conversationId: (record && record.conversationId) || "",
+        title: (record && record.title) || "",
+        needsMedia: ""
+      }
+    }, root);
+  }
+
+  async function loadRegistryExportedMarkdownFiles(root) {
+    const stored = await chrome.storage.local.get(EXPORT_REGISTRY_KEY).catch(() => ({}));
+    const registry = stored && stored[EXPORT_REGISTRY_KEY];
+    const items = registry && registry.items && typeof registry.items === "object"
+      ? Object.values(registry.items)
+      : [];
+
+    return items
+      .map((record) => registryFileFromRecord(record, root))
+      .filter(Boolean);
+  }
+
   async function listExportedMarkdownFiles() {
-    const rootPattern = `^${escapeRegExp(normalizePath(EXPORTED_MARKDOWN_ROOT))}/.*\\.md$`;
+    const settings = await loadExportSettings();
+    const root = normalizePath(settings.root || DEFAULT_EXPORT_ROOT_LABEL);
+    const rootPattern = root && root !== DEFAULT_EXPORT_ROOT_LABEL
+      ? `^${escapeRegExp(root)}/.*\\.md$`
+      : "";
     let items;
 
     try {
-      items = await searchDownloads({ state: "complete", filenameRegex: rootPattern });
+      items = rootPattern
+        ? await searchDownloads({ state: "complete", filenameRegex: rootPattern })
+        : [];
     } catch (_error) {
-      items = await searchDownloads({ state: "complete" });
+      items = [];
     }
 
     const seen = new Set();
     const files = [];
-    for (const item of items) {
-      if (item && item.exists === false) {
+    const snapshotFiles = await loadPackagedExportedMarkdownFiles();
+    const registryFiles = await loadRegistryExportedMarkdownFiles(root);
+    const allItems = [
+      ...items.filter((item) => item && item.exists !== false).map((item) => exportedMarkdownFile(item, root)),
+      ...registryFiles,
+      ...snapshotFiles
+    ].filter(Boolean);
+
+    for (const file of allItems) {
+      const key = normalizePath(file.filename || file.relativePath);
+      if (!key || seen.has(key)) {
         continue;
       }
 
-      const file = exportedMarkdownFile(item);
-      if (!file || seen.has(file.filename)) {
-        continue;
-      }
-
-      seen.add(file.filename);
+      seen.add(key);
       files.push(file);
     }
 
     return {
       ok: true,
-      root: EXPORTED_MARKDOWN_ROOT,
-      files
+      root,
+      files,
+      sources: {
+        downloads: items.length,
+        registry: registryFiles.length,
+        snapshot: snapshotFiles.length
+      }
     };
   }
 
@@ -220,15 +354,17 @@
     const filename = message.filename || "AI_Chat.md";
     const body = message.markdown || message.text || "";
     const mimeType = message.mimeType || "text/markdown";
-    const folder = message.folder || "AI Chat Exports";
+    const folder = message.folder || "";
+    const conflictAction = message.conflictAction || "uniquify";
     const url = `data:${mimeType};charset=utf-8;base64,${toBase64Utf8(body)}`;
+    const targetPath = downloadFilenamePath(folder, filename);
 
     chrome.downloads.download(
       {
         url,
-        filename: `${folder}/${filename}`,
+        filename: targetPath,
         saveAs: false,
-        conflictAction: "uniquify"
+        conflictAction: conflictAction
       },
       (downloadId) => {
         const error = chrome.runtime.lastError;

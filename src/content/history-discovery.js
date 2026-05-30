@@ -10,7 +10,8 @@
     gemini: [/^\/app\/[^/]+/i],
     grok: [/^\/chat\/[^/]+/i, /^\/c\/[^/]+/i],
     deepseek: [/^\/a\/chat\/s\/[^/]+/i, /^\/chat\/[^/]+/i, /^\/c\/[^/]+/i],
-    doubao: [/^\/chat\/[^/]+/i, /^\/conversation\/[^/]+/i, /^\/bot\/chat\/[^/]+/i]
+    doubao: [/^\/chat\/[^/]+/i, /^\/conversation\/[^/]+/i, /^\/bot\/chat\/[^/]+/i],
+    qwen: [/^\/chat\/[^/]+/i, /^\/c\/[^/]+/i, /^\/s\/[^/]+/i, /^\/conversation\/[^/]+/i]
   };
   const MONTHS = new Map([
     ["jan", 1],
@@ -317,9 +318,9 @@
 
   function cleanTitle(value, dateRaw = "") {
     const clean = stripDateText(value, dateRaw)
-      .replace(/\b(new chat|new conversation|chat history|conversation history|recent|pinned|more options|open chat|ChatGPT|DeepSeek|Doubao)\b/ig, " ")
+      .replace(/\b(new chat|new conversation|chat history|conversation history|recent|pinned|more options|open chat|ChatGPT|DeepSeek|Doubao|Qwen|Tongyi)\b/ig, " ")
       .replace(/\b(与\s*Gemini\s*对话|new conversation)\b/ig, " ")
-      .replace(/(更多选项|打开聊天|新对话|最近|已固定|历史记录|查看全部|豆包)/g, " ")
+      .replace(/(更多选项|打开聊天|新对话|最近|已固定|历史记录|查看全部|豆包|通义千问|千问)/g, " ")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -332,7 +333,7 @@
       return 0;
     }
 
-    if (/^(ChatGPT|Claude|Gemini|Grok|DeepSeek|Doubao|Chat|Conversation|与\s*Gemini\s*对话|New conversation)$/i.test(clean)) {
+    if (/^(ChatGPT|Claude|Gemini|Grok|DeepSeek|Doubao|Qwen|Chat|Conversation|与\s*Gemini\s*对话|与\s*(?:Qwen|通义千问|千问)\s*对话|New conversation)$/i.test(clean)) {
       return 1;
     }
 
@@ -661,6 +662,20 @@
     return items;
   }
 
+  function discoveredItemKey(item) {
+    if (!item) {
+      return "";
+    }
+
+    const conversationId = item.conversationId || conversationIdFromUrl(item.url || "");
+    const platform = platformForUrl(item.url || "") || String(item.platform || "").toLowerCase();
+    if (platform && conversationId) {
+      return `${platform}:${String(conversationId).normalize("NFKC").toLowerCase()}`;
+    }
+
+    return item.url || "";
+  }
+
   function isElementScrollable(element) {
     if (!element || !isVisible(element)) {
       return false;
@@ -969,7 +984,7 @@
   }
 
   async function maybeOpenSearchHistory(platformId) {
-    if (platformId !== "chatgpt" && platformId !== "claude" && platformId !== "gemini" && platformId !== "deepseek" && platformId !== "doubao") {
+    if (platformId !== "chatgpt" && platformId !== "claude" && platformId !== "gemini" && platformId !== "deepseek" && platformId !== "doubao" && platformId !== "qwen") {
       return false;
     }
 
@@ -1016,16 +1031,22 @@
     let added = 0;
 
     for (const item of links) {
-      if (target.has(item.url)) {
-        const existing = target.get(item.url);
+      const key = discoveredItemKey(item);
+      if (!key) {
+        continue;
+      }
+
+      if (target.has(key)) {
+        const existing = target.get(key);
         existing.title = existing.title || item.title;
         existing.conversationId = existing.conversationId || item.conversationId;
         existing.conversationTime = existing.conversationTime || item.conversationTime;
         existing.rawDateText = existing.rawDateText || item.rawDateText;
+        existing.url = existing.url || item.url;
         continue;
       }
 
-      target.set(item.url, item);
+      target.set(key, item);
       added += 1;
     }
 

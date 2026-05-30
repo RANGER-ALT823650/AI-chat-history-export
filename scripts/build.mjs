@@ -5,6 +5,8 @@ const projectRoot = new URL("..", import.meta.url).pathname;
 const dist = join(projectRoot, "dist");
 const ignoredNames = new Set([".DS_Store"]);
 
+await import("./generate-exported-index.mjs");
+
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 

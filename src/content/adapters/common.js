@@ -262,7 +262,8 @@
     }
 
     if (
-      /\b(assistant|model|answer|response|bot|claude|gemini|grok|deepseek|doubao)\b/.test(tokens) ||
+      /\b(assistant|model|answer|response|bot|claude|gemini|grok|deepseek|doubao|qwen|tongyi)\b/.test(tokens) ||
+      /通义千问|千问/.test(tokens) ||
       tokens.includes("model-response") ||
       tokens.includes("font-claude")
     ) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Chat Markdown Exporter",
-  "description": "Export the current ChatGPT, Claude, Gemini, Grok, DeepSeek, or Doubao conversation as RAG-friendly Markdown.",
+  "description": "Export the current ChatGPT, Claude, Gemini, Grok, DeepSeek, Doubao, or Qwen conversation as RAG-friendly Markdown.",
   "version": "0.1.0",
   "action": {
     "default_title": "Export AI chat",
@@ -30,7 +30,15 @@
     "https://deepseek.com/*",
     "https://*.deepseek.com/*",
     "https://doubao.com/*",
-    "https://*.doubao.com/*"
+    "https://*.doubao.com/*",
+    "https://qwen.ai/*",
+    "https://*.qwen.ai/*",
+    "https://qwenlm.ai/*",
+    "https://*.qwenlm.ai/*",
+    "https://qianwen.com/*",
+    "https://*.qianwen.com/*",
+    "https://tongyi.aliyun.com/*",
+    "https://qianwen.aliyun.com/*"
   ],
   "content_scripts": [
     {
@@ -47,7 +55,15 @@
         "https://deepseek.com/*",
         "https://*.deepseek.com/*",
         "https://doubao.com/*",
-        "https://*.doubao.com/*"
+        "https://*.doubao.com/*",
+        "https://qwen.ai/*",
+        "https://*.qwen.ai/*",
+        "https://qwenlm.ai/*",
+        "https://*.qwenlm.ai/*",
+        "https://qianwen.com/*",
+        "https://*.qianwen.com/*",
+        "https://tongyi.aliyun.com/*",
+        "https://qianwen.aliyun.com/*"
       ],
       "js": [
         "src/content/api-interceptor.js"
@@ -69,7 +85,15 @@
         "https://deepseek.com/*",
         "https://*.deepseek.com/*",
         "https://doubao.com/*",
-        "https://*.doubao.com/*"
+        "https://*.doubao.com/*",
+        "https://qwen.ai/*",
+        "https://*.qwen.ai/*",
+        "https://qwenlm.ai/*",
+        "https://*.qwenlm.ai/*",
+        "https://qianwen.com/*",
+        "https://*.qianwen.com/*",
+        "https://tongyi.aliyun.com/*",
+        "https://qianwen.aliyun.com/*"
       ],
       "js": [
         "src/content/platform-utils.js",
@@ -82,6 +106,7 @@
         "src/content/adapters/grok.js",
         "src/content/adapters/deepseek.js",
         "src/content/adapters/doubao.js",
+        "src/content/adapters/qwen.js",
         "src/content/adapters/claude.js",
         "src/content/history-discovery.js",
         "src/content/content.js"

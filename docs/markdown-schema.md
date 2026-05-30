@@ -10,6 +10,8 @@ Message bodies are serialized to stay close to each platform's native "copy Mark
 
 ```md
 ---
+status: raw
+needs_media: false
 platform: "ChatGPT"
 source_url: "https://chatgpt.com/c/..."
 conversation_title: "Example title"
@@ -21,6 +23,7 @@ conversation_id: "..."
 
 ## Metadata
 
+- Needs media: false
 - Platform: ChatGPT
 - Source URL: https://chatgpt.com/c/...
 - Conversation time: 2026-04-08T21:15:00+08:00
@@ -36,3 +39,7 @@ Answer text.
 ```
 
 If no actual conversation time is available, both `conversation_time` lines are omitted.
+
+`status: raw` is always written as the first YAML field so downstream vault workflows can identify freshly exported, unprocessed notes.
+
+`needs_media` is always written. It is `true` when the exported conversation still references unresolved images, files, or media placeholders; it is `false` when no media is needed or media references are already local relative paths.

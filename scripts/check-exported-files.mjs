@@ -1,12 +1,16 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-const targetDir = process.argv[2]
-  ? resolve(process.argv[2])
-  : join(homedir(), "Downloads", "AI Chat Exports");
+const targetArg = process.argv[2] || process.env.AI_CHAT_EXPORT_ROOT || "";
+if (!targetArg) {
+  console.error("Usage: node scripts/check-exported-files.mjs \"/path/to/export/folder\"");
+  console.error("Or set AI_CHAT_EXPORT_ROOT before running npm run check:exports.");
+  process.exit(1);
+}
 
-const requiredPlatforms = new Set(["ChatGPT", "Claude", "Gemini", "Grok"]);
+const targetDir = resolve(targetArg);
+
+const requiredPlatforms = new Set(["ChatGPT", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "Qwen"]);
 
 async function listMarkdownFiles(dir) {
   const entries = await readdir(dir);
@@ -44,12 +48,24 @@ function validateFile(filename, markdown) {
     errors.push("missing YAML front matter");
   }
 
+  if (!/^status:\s*raw\s*$/m.test(markdown)) {
+    errors.push("missing raw status");
+  }
+
   if (!/source_url:\s*["']?https?:\/\//.test(markdown)) {
     errors.push("missing source_url");
   }
 
+  if (!/^needs_media:\s*(?:true|false)\s*$/m.test(markdown)) {
+    errors.push("missing needs_media boolean");
+  }
+
   if (!/## Metadata/.test(markdown)) {
     errors.push("missing visible Metadata section");
+  }
+
+  if (!/^- Needs media: (?:true|false)\s*$/m.test(markdown)) {
+    errors.push("missing visible Needs media metadata");
   }
 
   if (!/## Message \d+ - User/.test(markdown)) {

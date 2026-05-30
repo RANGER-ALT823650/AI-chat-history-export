@@ -185,7 +185,7 @@
     if (/user|human|you|client|customer|prompt/.test(text)) {
       return "user";
     }
-    if (/assistant|model|bot|claude|gemini|grok|deepseek|doubao|chatgpt|ai/.test(text)) {
+    if (/assistant|model|bot|claude|gemini|grok|deepseek|doubao|qwen|tongyi|chatgpt|ai/.test(text) || /通义千问|千问/.test(text)) {
       return "assistant";
     }
     if (/system/.test(text)) {
@@ -566,23 +566,33 @@
   // ---------------------------------------------------------------------------
 
   function detectPlatform(url) {
-    if (/chatgpt\.com|chat\.openai\.com/i.test(url)) {
+    var resolvedUrl = url || "";
+    try {
+      resolvedUrl = new URL(url || window.location.href, window.location.href).href;
+    } catch (_error) {
+      resolvedUrl = url || "";
+    }
+
+    if (/chatgpt\.com|chat\.openai\.com/i.test(resolvedUrl)) {
       return "chatgpt";
     }
-    if (/claude\.ai/i.test(url)) {
+    if (/claude\.ai/i.test(resolvedUrl)) {
       return "claude";
     }
-    if (/gemini\.google\.com/i.test(url)) {
+    if (/gemini\.google\.com/i.test(resolvedUrl)) {
       return "gemini";
     }
-    if (/grok\.com|grok\.x\.ai|x\.com\/i\/grok/i.test(url)) {
+    if (/grok\.com|grok\.x\.ai|x\.com\/i\/grok/i.test(resolvedUrl)) {
       return "grok";
     }
-    if (/deepseek\.com/i.test(url)) {
+    if (/deepseek\.com/i.test(resolvedUrl)) {
       return "deepseek";
     }
-    if (/doubao\.com/i.test(url)) {
+    if (/doubao\.com/i.test(resolvedUrl)) {
       return "doubao";
+    }
+    if (/qwen\.ai|qwenlm\.ai|qianwen\.com|tongyi\.aliyun\.com|qianwen\.aliyun\.com/i.test(resolvedUrl)) {
+      return "qwen";
     }
     return "";
   }
@@ -1768,6 +1778,11 @@
       return;
     }
 
+    if (platform === "qwen") {
+      parseGenericConversationResponse(data, "Qwen");
+      return;
+    }
+
     if (platform === "gemini") {
       try {
         postGeminiDebugEvidenceFromText(JSON.stringify(data), sourceUrl || window.location.href, "json");
@@ -1831,7 +1846,8 @@
       (platform === "grok" && isGrokConversationEndpoint(url)) ||
       (platform === "gemini" && isGeminiEndpoint(url)) ||
       (platform === "deepseek" && isGenericConversationEndpoint(url)) ||
-      (platform === "doubao" && isGenericConversationEndpoint(url))
+      (platform === "doubao" && isGenericConversationEndpoint(url)) ||
+      (platform === "qwen" && isGenericConversationEndpoint(url))
     );
 
     if (!shouldIntercept) {
@@ -1892,7 +1908,8 @@
       (platform === "grok" && isGrokConversationEndpoint(url)) ||
       (platform === "gemini" && isGeminiEndpoint(url)) ||
       (platform === "deepseek" && isGenericConversationEndpoint(url)) ||
-      (platform === "doubao" && isGenericConversationEndpoint(url))
+      (platform === "doubao" && isGenericConversationEndpoint(url)) ||
+      (platform === "qwen" && isGenericConversationEndpoint(url))
     );
 
     if (shouldIntercept) {

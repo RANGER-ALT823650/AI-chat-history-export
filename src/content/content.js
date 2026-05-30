@@ -22,7 +22,8 @@
       gemini: namespace.GeminiAdapter,
       grok: namespace.GrokAdapter,
       deepseek: namespace.DeepSeekAdapter,
-      doubao: namespace.DoubaoAdapter
+      doubao: namespace.DoubaoAdapter,
+      qwen: namespace.QwenAdapter
     };
 
     return { platform, adapter: adapters[platform.id] || null };
@@ -112,7 +113,7 @@
     if (!platform || !adapter) {
       return {
         ok: false,
-        error: "当前页面不是已支持的 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包聊天页。"
+        error: "当前页面不是已支持的 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问聊天页。"
       };
     }
 
@@ -131,6 +132,9 @@
       filename,
       markdown: body,
       messageCount: conversation.messages.length,
+      title: conversation.title || "",
+      sourceUrl: conversation.sourceUrl || "",
+      conversationId: conversation.conversationId || "",
       conversationTime: conversation.conversationTime || "",
       hasConversationTime: Boolean(conversation.conversationTime)
     };
