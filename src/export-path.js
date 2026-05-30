@@ -9,9 +9,17 @@
   const DB_VERSION = 1;
   const STORE_NAME = "handles";
   const EXPORT_DIRECTORY_KEY = "exportDirectory";
-  const DEFAULT_EXPORT_ROOT_LABEL = "未设置导出目录";
+  const DEFAULT_DOWNLOAD_ROOT_LABEL = "浏览器默认下载目录";
+  const DEFAULT_EXPORT_ROOT_LABEL = DEFAULT_DOWNLOAD_ROOT_LABEL;
 
   function isSupported() {
+    return Boolean(
+      (global.chrome && chrome.runtime && chrome.runtime.sendMessage) ||
+      canPickExportDirectory()
+    );
+  }
+
+  function canPickExportDirectory() {
     return Boolean(global.showDirectoryPicker && global.indexedDB);
   }
 
@@ -79,7 +87,7 @@
       : {};
 
     return {
-      exportMode: settings.exportMode || "",
+      exportMode: settings.exportMode || "downloads",
       exportRootLabel: settings.exportRootLabel || "",
       exportRootName: settings.exportRootName || "",
       updatedAt: settings.updatedAt || ""
@@ -98,7 +106,11 @@
 
   async function exportRootLabel() {
     const settings = await loadSettings();
-    return settings.exportRootLabel || settings.exportRootName || DEFAULT_EXPORT_ROOT_LABEL;
+    if (settings.exportMode === "file-system-access") {
+      return settings.exportRootLabel || settings.exportRootName || DEFAULT_DOWNLOAD_ROOT_LABEL;
+    }
+
+    return DEFAULT_DOWNLOAD_ROOT_LABEL;
   }
 
   async function queryPermission(handle, requestWrite) {
@@ -128,7 +140,7 @@
   }
 
   async function pickExportDirectory() {
-    if (!isSupported()) {
+    if (!canPickExportDirectory()) {
       throw new Error("当前浏览器不支持自由选择本地导出目录，请使用新版 Chrome 或 Edge。");
     }
 
@@ -136,7 +148,7 @@
       id: "ai-chat-exporter-root",
       mode: "readwrite"
     });
-    const granted = await queryPermission(handle, true);
+    const granted = await requestPermission(handle, true);
     if (!granted) {
       throw new Error("没有获得导出目录写入权限。");
     }
@@ -149,17 +161,12 @@
     });
   }
 
-  async function getExportDirectoryHandle(options = {}) {
-    if (!isSupported()) {
+  async function getExportDirectoryHandle() {
+    if (!canPickExportDirectory()) {
       return null;
     }
 
-    let handle = await loadDirectoryHandle().catch(() => null);
-    if (!handle && options.prompt) {
-      await pickExportDirectory();
-      handle = await loadDirectoryHandle().catch(() => null);
-    }
-
+    const handle = await loadDirectoryHandle().catch(() => null);
     if (!handle) {
       return null;
     }
@@ -169,24 +176,16 @@
       return handle;
     }
 
-    if (!options.prompt) {
-      return null;
-    }
-
-    if (await requestPermission(handle, true)) {
-      return handle;
-    }
-
-    await pickExportDirectory();
-    return loadDirectoryHandle().catch(() => null);
+    return null;
   }
 
   async function hasExportDirectory() {
-    return Boolean(await getExportDirectoryHandle({ prompt: false }));
-  }
+    const settings = await loadSettings();
+    if (settings.exportMode !== "file-system-access") {
+      return true;
+    }
 
-  async function requestExportDirectoryAccess() {
-    return Boolean(await getExportDirectoryHandle({ prompt: true }));
+    return Boolean(await getExportDirectoryHandle());
   }
 
   function normalizePath(value) {
@@ -276,10 +275,10 @@
     return true;
   }
 
-  async function writeMarkdownFile(options = {}) {
-    const directoryHandle = await getExportDirectoryHandle({ prompt: Boolean(options.prompt) });
+  async function writeFileSystemMarkdownFile(options = {}) {
+    const directoryHandle = await getExportDirectoryHandle();
     if (!directoryHandle) {
-      throw new Error("请先选择导出目录。");
+      throw new Error("自定义导出目录权限不可用，请点击“自定义导出目录”重新授权。");
     }
 
     const platform = cleanSegment(options.platform || "AI", "AI");
@@ -315,15 +314,65 @@
     };
   }
 
+  async function downloadMarkdownFile(options = {}) {
+    const platform = cleanSegment(options.platform || "AI", "AI");
+    const filename = cleanFilename(options.filename || "AI_Chat.md", "AI_Chat.md");
+    const response = await chrome.runtime.sendMessage({
+      type: "DOWNLOAD_MARKDOWN",
+      folder: platform,
+      filename,
+      markdown: options.markdown || options.text || "",
+      mimeType: options.mimeType || "text/markdown",
+      conflictAction: options.conflictAction || "uniquify"
+    });
+
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "写入 Markdown 失败。");
+    }
+
+    const relativePath = response.relativePath || `${platform}/${response.filename || filename}`;
+    const actualFilename = response.filename || relativePath.split("/").pop() || filename;
+    await rememberExportedFile({
+      platform,
+      conversationId: options.conversationId || "",
+      sourceUrl: options.sourceUrl || options.url || "",
+      title: options.title || "",
+      conversationTime: options.conversationTime || "",
+      rawDateText: options.rawDateText || "",
+      filename: actualFilename,
+      relativePath,
+      messageCount: options.messageCount || 0,
+      exportRoot: DEFAULT_DOWNLOAD_ROOT_LABEL
+    });
+
+    return {
+      ok: true,
+      filename: actualFilename,
+      relativePath,
+      path: `${DEFAULT_DOWNLOAD_ROOT_LABEL}/${relativePath}`,
+      downloadId: response.downloadId || null
+    };
+  }
+
+  async function writeMarkdownFile(options = {}) {
+    const settings = await loadSettings();
+    if (settings.exportMode === "file-system-access") {
+      return writeFileSystemMarkdownFile(options);
+    }
+
+    return downloadMarkdownFile(options);
+  }
+
   namespace.DEFAULT_EXPORT_ROOT_LABEL = DEFAULT_EXPORT_ROOT_LABEL;
+  namespace.DEFAULT_DOWNLOAD_ROOT_LABEL = DEFAULT_DOWNLOAD_ROOT_LABEL;
   namespace.SETTINGS_KEY = SETTINGS_KEY;
   namespace.REGISTRY_KEY = REGISTRY_KEY;
+  namespace.canPickExportDirectory = canPickExportDirectory;
   namespace.exportRootLabel = exportRootLabel;
   namespace.hasExportDirectory = hasExportDirectory;
   namespace.isSupported = isSupported;
   namespace.loadSettings = loadSettings;
   namespace.pickExportDirectory = pickExportDirectory;
   namespace.rememberExportedFile = rememberExportedFile;
-  namespace.requestExportDirectoryAccess = requestExportDirectoryAccess;
   namespace.writeMarkdownFile = writeMarkdownFile;
 })(globalThis);

@@ -653,6 +653,27 @@ assert.equal(exportedFileList.files[0].metadata.conversationId, "geminimetadata1
 assert.equal(exportedFileList.files[0].metadata.title, "真实 Gemini 标题");
 assert.equal(exportedFileList.files[0].metadata.needsMedia, "false");
 
+const defaultDownloadsFileList = await listExportedFilesWithHarness([
+  {
+    id: 2,
+    exists: true,
+    filename: "/Users/example/Downloads/Gemini/2026-03-19_Gemini_默认下载目录.md",
+    url: `data:text/markdown;charset=utf-8;base64,${Buffer.from(`---
+status: raw
+needs_media: false
+platform: "Gemini"
+source_url: "https://gemini.google.com/app/defaultdownloads123"
+conversation_title: "默认下载目录"
+conversation_id: "defaultdownloads123"
+---
+`, "utf8").toString("base64")}`
+  }
+]);
+assert.equal(defaultDownloadsFileList.ok, true);
+assert.equal(defaultDownloadsFileList.root, "浏览器默认下载目录");
+assert.equal(defaultDownloadsFileList.files.length, 1);
+assert.equal(defaultDownloadsFileList.files[0].relativePath, "Gemini/2026-03-19_Gemini_默认下载目录.md");
+
 const exportedFileSnapshotList = await listExportedFilesWithHarness([], {
   version: 1,
   files: [
@@ -705,6 +726,16 @@ const markdownDownload = await downloadTextWithHarness({
 });
 assert.equal(markdownDownload.response.ok, true);
 assert.equal(markdownDownload.downloadOptions.filename, "Claude/2026-04-12_Claude_聊天记录导出缺少时间戳.md");
+
+const defaultDownloadsMarkdown = await downloadTextWithHarness({
+  type: "DOWNLOAD_MARKDOWN",
+  filename: "2026-04-12_Claude_聊天记录导出缺少时间戳.md",
+  markdown: "# Test",
+  folder: "Claude"
+});
+assert.equal(defaultDownloadsMarkdown.response.ok, true);
+assert.equal(defaultDownloadsMarkdown.downloadOptions.filename, "Claude/2026-04-12_Claude_聊天记录导出缺少时间戳.md");
+assert.equal(defaultDownloadsMarkdown.response.relativePath, "Claude/2026-04-12_Claude_聊天记录导出缺少时间戳.md");
 
 assert.equal(geminiConfig.platformLabel, "Gemini");
 assert.equal(geminiConfig.preferVisibleHistoryConversationTime, true);

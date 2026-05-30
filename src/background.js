@@ -3,7 +3,9 @@
 
   const EXPORT_SETTINGS_KEY = "aiChatExporterSettings";
   const EXPORT_REGISTRY_KEY = "aiChatExporterExportRegistry";
-  const DEFAULT_EXPORT_ROOT_LABEL = "未设置导出目录";
+  const DEFAULT_DOWNLOAD_ROOT_LABEL = "浏览器默认下载目录";
+  const DEFAULT_EXPORT_ROOT_LABEL = DEFAULT_DOWNLOAD_ROOT_LABEL;
+  const DOWNLOAD_PLATFORM_FOLDERS = ["ChatGPT", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "Qwen", "AI"];
   const PACKAGED_EXPORTED_INDEX_PATH = "src/exported-markdown-index.json";
 
   function toBase64Utf8(value) {
@@ -45,6 +47,53 @@
 
     cleanFolder = stripUnsafePathSegments(cleanFolder);
     return cleanFolder ? `${cleanFolder}/${cleanFilename}` : cleanFilename;
+  }
+
+  function relativePathFromDownloadRoot(filename, rootName) {
+    const normalized = normalizePath(filename);
+    const cleanRoot = stripUnsafePathSegments(rootName || "");
+    if (!normalized || !cleanRoot) {
+      return "";
+    }
+
+    const parts = normalized.split("/").filter(Boolean);
+    const rootParts = cleanRoot.split("/").filter(Boolean);
+    if (!parts.length || !rootParts.length || parts.length < rootParts.length) {
+      return "";
+    }
+
+    for (let index = parts.length - rootParts.length; index >= 0; index -= 1) {
+      const candidate = parts.slice(index, index + rootParts.length).join("/");
+      if (candidate === cleanRoot) {
+        return parts.slice(index + rootParts.length).join("/");
+      }
+    }
+
+    if (normalized.startsWith(`${cleanRoot}/`)) {
+      return normalized.slice(cleanRoot.length).replace(/^\/+/, "");
+    }
+
+    return "";
+  }
+
+  function relativePathFromPlatformFolder(filename) {
+    const parts = normalizePath(filename).split("/").filter(Boolean);
+    if (parts.length < 2) {
+      return "";
+    }
+
+    const platformFolders = new Set(DOWNLOAD_PLATFORM_FOLDERS);
+    for (let index = parts.length - 2; index >= 0; index -= 1) {
+      if (platformFolders.has(parts[index])) {
+        return parts.slice(index).join("/");
+      }
+    }
+
+    return "";
+  }
+
+  function basenameFromPath(value, fallback = "AI_Chat.md") {
+    return normalizePath(value).split("/").filter(Boolean).pop() || fallback;
   }
 
   function escapeRegExp(value) {
@@ -264,8 +313,12 @@
     const settings = stored && stored[EXPORT_SETTINGS_KEY] && typeof stored[EXPORT_SETTINGS_KEY] === "object"
       ? stored[EXPORT_SETTINGS_KEY]
       : {};
+    const mode = settings.exportMode || "downloads";
     return {
-      root: settings.exportRootLabel || settings.exportRootName || DEFAULT_EXPORT_ROOT_LABEL
+      mode,
+      root: mode === "file-system-access"
+        ? settings.exportRootLabel || settings.exportRootName || DEFAULT_EXPORT_ROOT_LABEL
+        : DEFAULT_DOWNLOAD_ROOT_LABEL
     };
   }
 
@@ -305,9 +358,11 @@
   async function listExportedMarkdownFiles() {
     const settings = await loadExportSettings();
     const root = normalizePath(settings.root || DEFAULT_EXPORT_ROOT_LABEL);
-    const rootPattern = root && root !== DEFAULT_EXPORT_ROOT_LABEL
-      ? `^${escapeRegExp(root)}/.*\\.md$`
-      : "";
+    const rootPattern = settings.mode === "downloads"
+      ? `(?:^|[\\\\/])(?:${DOWNLOAD_PLATFORM_FOLDERS.map(escapeRegExp).join("|")})[\\\\/].*\\.md$`
+      : root && root !== DEFAULT_EXPORT_ROOT_LABEL
+        ? `^${escapeRegExp(root)}/.*\\.md$`
+        : "";
     let items;
 
     try {
@@ -323,7 +378,15 @@
     const snapshotFiles = await loadPackagedExportedMarkdownFiles();
     const registryFiles = await loadRegistryExportedMarkdownFiles(root);
     const allItems = [
-      ...items.filter((item) => item && item.exists !== false).map((item) => exportedMarkdownFile(item, root)),
+      ...items.filter((item) => item && item.exists !== false).map((item) => settings.mode === "downloads"
+        ? exportedMarkdownSnapshotFile({
+          id: item.id,
+          filename: normalizePath(item.filename),
+          relativePath: relativePathFromPlatformFolder(item.filename),
+          basename: basenameFromPath(item.filename),
+          metadata: markdownMetadataFromDownload(item)
+        }, root)
+        : exportedMarkdownFile(item, root)),
       ...registryFiles,
       ...snapshotFiles
     ].filter(Boolean);
@@ -358,6 +421,7 @@
     const conflictAction = message.conflictAction || "uniquify";
     const url = `data:${mimeType};charset=utf-8;base64,${toBase64Utf8(body)}`;
     const targetPath = downloadFilenamePath(folder, filename);
+    const rootName = stripUnsafePathSegments(message.rootName || "");
 
     chrome.downloads.download(
       {
@@ -366,14 +430,26 @@
         saveAs: false,
         conflictAction: conflictAction
       },
-      (downloadId) => {
+      async (downloadId) => {
         const error = chrome.runtime.lastError;
         if (error) {
           sendResponse({ ok: false, error: error.message });
           return;
         }
 
-        sendResponse({ ok: true, downloadId });
+        const [downloadItem] = await searchDownloads({ id: downloadId }).catch(() => []);
+        const finalPath = normalizePath((downloadItem && downloadItem.filename) || targetPath);
+        const relativePath = rootName
+          ? relativePathFromDownloadRoot(finalPath, rootName) || relativePathFromDownloadRoot(targetPath, rootName)
+          : normalizePath(targetPath);
+
+        sendResponse({
+          ok: true,
+          downloadId,
+          filename: basenameFromPath(finalPath || targetPath, filename),
+          relativePath: relativePath || basenameFromPath(finalPath || targetPath, filename),
+          path: finalPath || targetPath
+        });
       }
     );
   }

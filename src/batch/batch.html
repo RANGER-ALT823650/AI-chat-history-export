@@ -17,7 +17,7 @@
       </header>
 
       <section class="controls" aria-label="批量导出控制">
-        <button id="choosePathButton" class="secondary" type="button">选择导出目录</button>
+        <button id="choosePathButton" class="secondary" type="button">自定义导出目录</button>
         <button id="discoverButton" type="button">扫描历史列表</button>
         <button id="exportButton" type="button" disabled>开始导出</button>
         <button id="cancelButton" class="secondary" type="button" disabled>取消</button>
@@ -26,7 +26,7 @@
       </section>
 
       <p id="exportPath" class="status">导出目录：正在读取...</p>
-      <p id="status" class="status" role="status">先在 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问页面打开本控制台，然后选择导出目录并扫描历史列表。扫描时会优先按 Markdown 元数据里的 conversation_id 去重，并对比已导出的文件记录。</p>
+      <p id="status" class="status" role="status">先在 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问页面打开本控制台，然后扫描历史列表。默认导出到浏览器下载目录，也可以先自定义导出目录。扫描时会优先按 Markdown 元数据里的 conversation_id 去重，并对比已导出的文件记录。</p>
 
       <section class="summary" aria-label="导出统计">
         <span id="totalCount">总数 0</span>

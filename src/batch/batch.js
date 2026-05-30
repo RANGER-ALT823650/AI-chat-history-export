@@ -22,7 +22,7 @@
   ];
   const STORAGE_KEY = "aiChatExporterBatchState";
   const REGISTRY_KEY = "aiChatExporterExportRegistry";
-  const DEFAULT_EXPORT_ROOT_LABEL = "未设置导出目录";
+  const DEFAULT_EXPORT_ROOT_LABEL = "浏览器默认下载目录";
   const exportPath = window.AIChatExporterExportPath;
   const params = new URLSearchParams(window.location.search);
   const sourceTabId = Number(params.get("sourceTabId"));
@@ -316,7 +316,7 @@
 
   async function refreshExportPathStatus() {
     if (!exportPath || !exportPath.isSupported()) {
-      exportPathElement.textContent = "导出目录：当前浏览器不支持自由选择本地目录，请使用新版 Chrome 或 Edge。";
+      exportPathElement.textContent = "导出目录：当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。";
       choosePathButton.disabled = true;
       return false;
     }
@@ -326,26 +326,20 @@
     exportDirectoryReady = hasDirectory;
     exportPathElement.textContent = hasDirectory
       ? `导出目录：${label}`
-      : "导出目录：未设置，首次扫描或导出前请选择。";
-    choosePathButton.disabled = false;
+      : `导出目录：${label}（自定义目录权限不可用，请重新选择）`;
+    choosePathButton.disabled = !exportPath.canPickExportDirectory || !exportPath.canPickExportDirectory();
     return hasDirectory;
   }
 
   async function ensureExportDirectory() {
     if (!exportPath || !exportPath.isSupported()) {
-      throw new Error("当前浏览器不支持自由选择本地导出目录，请使用新版 Chrome 或 Edge。");
+      throw new Error("当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。");
     }
 
-    if (!exportDirectoryReady) {
-      await exportPath.pickExportDirectory();
-      await refreshExportPathStatus();
-      return;
-    }
-
-    if (!(await exportPath.requestExportDirectoryAccess())) {
+    if (!(await exportPath.hasExportDirectory())) {
       exportDirectoryReady = false;
       await refreshExportPathStatus();
-      throw new Error("导出目录权限已失效，请点击“选择导出目录”重新授权。");
+      throw new Error("导出目录权限已失效，请点击“自定义导出目录”重新授权。");
     }
   }
 
