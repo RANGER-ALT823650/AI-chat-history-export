@@ -342,7 +342,7 @@
       return;
     }
 
-    if (!(await exportPath.hasExportDirectory())) {
+    if (!(await exportPath.requestExportDirectoryAccess())) {
       exportDirectoryReady = false;
       await refreshExportPathStatus();
       throw new Error("导出目录权限已失效，请点击“选择导出目录”重新授权。");

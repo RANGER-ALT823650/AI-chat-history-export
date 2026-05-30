@@ -101,21 +101,30 @@
     return settings.exportRootLabel || settings.exportRootName || DEFAULT_EXPORT_ROOT_LABEL;
   }
 
-  async function queryOrRequestPermission(handle, requestWrite) {
+  async function queryPermission(handle, requestWrite) {
     if (!handle) {
       return false;
     }
 
     const options = requestWrite ? { mode: "readwrite" } : { mode: "read" };
-    if (handle.queryPermission && (await handle.queryPermission(options)) === "granted") {
+    return handle.queryPermission
+      ? (await handle.queryPermission(options)) === "granted"
+      : false;
+  }
+
+  async function requestPermission(handle, requestWrite) {
+    if (!handle) {
+      return false;
+    }
+
+    if (await queryPermission(handle, requestWrite)) {
       return true;
     }
 
-    if (handle.requestPermission) {
-      return (await handle.requestPermission(options)) === "granted";
-    }
-
-    return false;
+    const options = requestWrite ? { mode: "readwrite" } : { mode: "read" };
+    return handle.requestPermission
+      ? (await handle.requestPermission(options)) === "granted"
+      : false;
   }
 
   async function pickExportDirectory() {
@@ -127,7 +136,7 @@
       id: "ai-chat-exporter-root",
       mode: "readwrite"
     });
-    const granted = await queryOrRequestPermission(handle, true);
+    const granted = await queryPermission(handle, true);
     if (!granted) {
       throw new Error("没有获得导出目录写入权限。");
     }
@@ -155,7 +164,7 @@
       return null;
     }
 
-    const granted = await queryOrRequestPermission(handle, true);
+    const granted = await queryPermission(handle, true);
     if (granted) {
       return handle;
     }
@@ -164,12 +173,20 @@
       return null;
     }
 
+    if (await requestPermission(handle, true)) {
+      return handle;
+    }
+
     await pickExportDirectory();
     return loadDirectoryHandle().catch(() => null);
   }
 
   async function hasExportDirectory() {
     return Boolean(await getExportDirectoryHandle({ prompt: false }));
+  }
+
+  async function requestExportDirectoryAccess() {
+    return Boolean(await getExportDirectoryHandle({ prompt: true }));
   }
 
   function normalizePath(value) {
@@ -307,5 +324,6 @@
   namespace.loadSettings = loadSettings;
   namespace.pickExportDirectory = pickExportDirectory;
   namespace.rememberExportedFile = rememberExportedFile;
+  namespace.requestExportDirectoryAccess = requestExportDirectoryAccess;
   namespace.writeMarkdownFile = writeMarkdownFile;
 })(globalThis);
