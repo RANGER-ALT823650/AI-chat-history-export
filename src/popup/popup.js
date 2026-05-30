@@ -50,6 +50,7 @@
   const platformElement = document.getElementById("platform");
   const pathElement = document.getElementById("exportPath");
   const choosePathButton = document.getElementById("choosePathButton");
+  const defaultPathButton = document.getElementById("defaultPathButton");
   const statusElement = document.getElementById("status");
   const exportButton = document.getElementById("exportButton");
   const batchButton = document.getElementById("batchButton");
@@ -109,6 +110,7 @@
     if (!exportPath || !exportPath.isSupported()) {
       pathElement.textContent = "导出目录：当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。";
       choosePathButton.disabled = true;
+      defaultPathButton.disabled = true;
       return false;
     }
 
@@ -119,6 +121,7 @@
       ? `导出目录：${label}`
       : `导出目录：${label}（自定义目录权限不可用，请重新选择）`;
     choosePathButton.disabled = !exportPath.canPickExportDirectory || !exportPath.canPickExportDirectory();
+    defaultPathButton.disabled = false;
     return hasDirectory;
   }
 
@@ -415,6 +418,21 @@
       statusElement.textContent = error && error.message ? error.message : String(error);
     } finally {
       choosePathButton.disabled = false;
+    }
+  });
+
+  defaultPathButton.addEventListener("click", async () => {
+    defaultPathButton.disabled = true;
+    statusElement.textContent = "正在切换到浏览器默认下载目录...";
+
+    try {
+      await exportPath.useDefaultDownloadDirectory();
+      await refreshExportPathStatus();
+      statusElement.textContent = "已切换为浏览器默认下载目录。";
+    } catch (error) {
+      statusElement.textContent = error && error.message ? error.message : String(error);
+    } finally {
+      defaultPathButton.disabled = false;
     }
   });
 

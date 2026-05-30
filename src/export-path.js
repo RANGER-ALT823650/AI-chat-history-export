@@ -161,6 +161,14 @@
     });
   }
 
+  function useDefaultDownloadDirectory() {
+    return saveSettings({
+      exportMode: "downloads",
+      exportRootName: "",
+      exportRootLabel: ""
+    });
+  }
+
   async function getExportDirectoryHandle() {
     if (!canPickExportDirectory()) {
       return null;
@@ -374,5 +382,6 @@
   namespace.loadSettings = loadSettings;
   namespace.pickExportDirectory = pickExportDirectory;
   namespace.rememberExportedFile = rememberExportedFile;
+  namespace.useDefaultDownloadDirectory = useDefaultDownloadDirectory;
   namespace.writeMarkdownFile = writeMarkdownFile;
 })(globalThis);
