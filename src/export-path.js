@@ -134,9 +134,13 @@
     }
 
     const options = requestWrite ? { mode: "readwrite" } : { mode: "read" };
-    return handle.requestPermission
-      ? (await handle.requestPermission(options)) === "granted"
-      : false;
+    try {
+      return handle.requestPermission
+        ? (await handle.requestPermission(options)) === "granted"
+        : false;
+    } catch (_error) {
+      return false;
+    }
   }
 
   async function pickExportDirectory() {
@@ -169,7 +173,7 @@
     });
   }
 
-  async function getExportDirectoryHandle() {
+  async function getExportDirectoryHandle(options = {}) {
     if (!canPickExportDirectory()) {
       return null;
     }
@@ -179,8 +183,16 @@
       return null;
     }
 
+    if (!options.checkPermission && !options.requestPermission) {
+      return handle;
+    }
+
     const granted = await queryPermission(handle, true);
     if (granted) {
+      return handle;
+    }
+
+    if (options.requestPermission && await requestPermission(handle, true)) {
       return handle;
     }
 
@@ -194,6 +206,15 @@
     }
 
     return Boolean(await getExportDirectoryHandle());
+  }
+
+  async function requestExportDirectoryAccess() {
+    const settings = await loadSettings();
+    if (settings.exportMode !== "file-system-access") {
+      return true;
+    }
+
+    return Boolean(await getExportDirectoryHandle({ requestPermission: true }));
   }
 
   function normalizePath(value) {
@@ -284,7 +305,10 @@
   }
 
   async function writeFileSystemMarkdownFile(options = {}) {
-    const directoryHandle = await getExportDirectoryHandle();
+    const directoryHandle = await getExportDirectoryHandle({
+      checkPermission: true,
+      requestPermission: Boolean(options.requestPermission)
+    });
     if (!directoryHandle) {
       throw new Error("自定义导出目录权限不可用，请点击“自定义导出目录”重新授权。");
     }
@@ -382,6 +406,7 @@
   namespace.loadSettings = loadSettings;
   namespace.pickExportDirectory = pickExportDirectory;
   namespace.rememberExportedFile = rememberExportedFile;
+  namespace.requestExportDirectoryAccess = requestExportDirectoryAccess;
   namespace.useDefaultDownloadDirectory = useDefaultDownloadDirectory;
   namespace.writeMarkdownFile = writeMarkdownFile;
 })(globalThis);

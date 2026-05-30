@@ -334,15 +334,18 @@
     return hasDirectory;
   }
 
-  async function ensureExportDirectory() {
+  async function ensureExportDirectory(options = {}) {
     if (!exportPath || !exportPath.isSupported()) {
       throw new Error("当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。");
     }
 
-    if (!(await exportPath.hasExportDirectory())) {
+    const ready = options.requestPermission === false
+      ? await exportPath.hasExportDirectory()
+      : await exportPath.requestExportDirectoryAccess();
+    if (!ready) {
       exportDirectoryReady = false;
       await refreshExportPathStatus();
-      throw new Error("导出目录权限已失效，请点击“自定义导出目录”重新授权。");
+      throw new Error("导出目录权限未授权，请点击“自定义导出目录”重新选择或改用默认下载目录。");
     }
   }
 
@@ -826,7 +829,7 @@
   }
 
   async function downloadMarkdown(result, platform, overwrite = false) {
-    await ensureExportDirectory();
+    await ensureExportDirectory({ requestPermission: false });
     const written = await exportPath.writeMarkdownFile({
       platform: platform || result.platform || "AI",
       filename: result.filename,
