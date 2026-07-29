@@ -10,17 +10,11 @@
     <main>
       <h1>AI Chat Exporter</h1>
       <p id="platform" class="muted">正在检测当前页面...</p>
-      <section class="path-panel" aria-label="导出目录设置">
-        <p id="exportPath" class="muted">导出目录：正在读取...</p>
-        <button id="choosePathButton" class="secondary" type="button">自定义导出目录</button>
-        <button id="defaultPathButton" class="secondary" type="button">使用默认下载目录</button>
-      </section>
       <button id="exportButton" type="button">导出当前聊天为 Markdown</button>
       <button id="batchButton" class="secondary" type="button">批量导出账号历史</button>
       <button id="debugButton" class="secondary" type="button">下载页面调试快照</button>
       <p id="status" class="status" role="status"></p>
     </main>
-    <script src="../export-path.js"></script>
     <script src="./popup.js"></script>
   </body>
 </html>

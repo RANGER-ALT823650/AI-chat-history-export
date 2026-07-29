@@ -7,7 +7,9 @@
     "refresh:export-index": "node scripts/generate-exported-index.mjs",
     "test": "node tests/run-tests.mjs",
     "build": "node scripts/build.mjs",
+    "build:safari": "node scripts/build-safari.mjs",
     "check:exports": "node scripts/check-exported-files.mjs",
+    "verify:safari-export": "node scripts/verify-safari-export.mjs",
     "verify": "npm run test && npm run build"
   }
 }

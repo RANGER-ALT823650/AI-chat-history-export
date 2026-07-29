@@ -1,12 +1,27 @@
 # AI Chat Markdown Exporter
 
-一个兼容 Chrome / Edge 的浏览器扩展，用于把网页端 AI 聊天记录导出为适合 RAG、知识库和 Obsidian 归档的 Markdown。
+这是一个兼容 Chrome / Edge / Safari 的浏览器扩展，用于把当前 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包聊天导出为 Markdown，方便后续做 RAG 索引。
+
+## 导出内容
+
+- 平台名称：`ChatGPT`、`Claude`、`Gemini`、`Grok`、`DeepSeek` 或 `Doubao`
+- `status: raw`：标记导出结果仍是未处理原始素材
+- 来源 URL
+- 会话标题
+- 能从 URL 推导时的会话 ID
+- `needs_media`：标记导出结果是否仍需要补齐图片、文件或其他媒体
+- 页面数据、DOM 元数据或平台会话 API 暴露的真实会话/消息时间
+- User / Assistant 消息，保留为 Markdown
+- KaTeX、MathJax、SVG 节点中可用的数学可访问文本
+
+扩展会刻意避免写入导出时间。
+当前版本仍是 Markdown 导出器，不会把远程图片或文件本体保存到本地；如果聊天里出现未落盘的媒体引用，`needs_media` 会写为 `true`。如果媒体已经以本地相对路径引用，或聊天不包含媒体，`needs_media` 会写为 `false`。
 
 ## ✨ 核心特性
 
-- ⏰ **真实聊天时间，而非导出时间** — 每条导出的聊天记录都使用对话发生的真实时间，拒绝用「导出时间」充数。归档到 Obsidian 或知识库时，再也不会搞不清到底是哪天聊的！
-- 🔄 **增量导出，可持续不重复** — 批量导出后自动记录已导出的聊天 ID 和 URL，下次扫描自动跳过，只导出新内容。跑一次、跑十次，都不重复不遗漏，放心用到天荒地老 🌈
-- 🔒 **原生浏览器扩展，安全可靠** — 直接以 Chrome/Edge 插件形式安装，不依赖油猴脚本、不经过任何第三方中间件。源码全透明，权限可控，给你的聊天数据满满安全感 🛡️
+- ⏰ **真实聊天时间，而非导出时间** — 每条导出的聊天记录都使用对话发生的真实时间，归档到 Obsidian 或知识库时不会与导出时间混淆。
+- 🔄 **增量导出，可持续不重复** — 批量导出后记录已导出的聊天 ID 和 URL，下次扫描自动跳过无变化的内容。
+- 🔒 **一套源码兼容多浏览器** — Edge/Chrome 使用标准下载 API，Safari 构建自动转换权限并通过原生扩展保存文件。
 
 ## 支持平台
 
@@ -16,211 +31,160 @@
 - Grok：`https://grok.com/*`、`https://x.com/i/grok*`、`https://grok.x.ai/*`
 - DeepSeek：`https://chat.deepseek.com/*`
 - 豆包：`https://*.doubao.com/*`
-- 千问 / Qwen：`https://qwen.ai/*`、`https://chat.qwen.ai/*`、`https://qianwen.com/*`、`https://tongyi.aliyun.com/*`
 
-Qwen 官方入口可参考 [qwen.ai/qwenchat](https://qwen.ai/qwenchat)，扩展同时保留了通义千问常见旧域名和国内入口的匹配。
+## 在 Chrome 或 Edge 中加载
 
-## 导出结果
+1. 运行 `npm run verify`。
+2. 打开 Chrome 或 Edge 的扩展管理页面。
+3. 开启开发者模式。
+4. 从生成的 `dist/` 文件夹加载未打包扩展。
 
-每个 Markdown 文件包含：
-
-- YAML front matter，包含 `status: raw`、`platform`、`source_url`、`conversation_title`、`conversation_id`、`needs_media`
-- 能从页面、历史列表或网页 API 取得时的真实 `conversation_time`
-- User / Assistant 消息正文，尽量保留标题、列表、代码块、表格、引用和数学内容
-- 可见 Metadata 区域，方便人工检查和后续脚本处理
-
-扩展不会写入 `exported_at` 之类的导出时间，避免把整理时间误当成聊天发生时间。
-
-当前版本只导出文本和 Markdown 引用，不会把远程图片、附件或文件本体保存到本地。如果聊天中有未落盘媒体，`needs_media` 会标记为 `true`。
-
-## 首次安装
-
-这个扩展目前不是 Chrome Web Store 商店插件，需要用“开发者模式”加载。新手建议先用方式 A，整个过程不需要命令行。
-
-### 方式 A：下载源码后直接加载
-
-1. 打开本项目 GitHub 页面。
-2. 点击绿色 `Code` 按钮。
-3. 点击 `Download ZIP`。
-4. 解压下载到本地的 ZIP 文件。
-5. 找到解压后的项目文件夹，确认这个文件夹里面能直接看到 `manifest.json`、`src/`、`README.md`。
-6. 打开 Chrome 或 Edge。
-7. 在地址栏输入：
-
-   ```text
-   chrome://extensions
+   ```bash
+   npm run build
    ```
 
-   Edge 用户也可以输入：
+5. 打开 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包的聊天页面。
+6. 点击扩展图标。
+7. 点击 `导出当前聊天为 Markdown`。
 
-   ```text
-   edge://extensions
+下载文件会保存到 `/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/` 下对应的平台文件夹。
+
+## 在 Safari 中加载
+
+Safari 版本通过 Xcode 的 Safari Web Extension 项目运行：
+
+1. 运行 Safari 打包脚本。
+
+   ```bash
+   npm run build:safari
    ```
 
-8. 打开右上角的“开发者模式”。
-9. 点击“加载已解压的扩展程序”。
-10. 选择第 5 步确认过的项目文件夹。
-11. 页面里出现 `AI Chat Markdown Exporter` 后，安装完成。
+2. 打开生成的 Xcode 项目：
 
-如果浏览器提示找不到清单文件，通常是选错了目录。请重新选择那个直接包含 `manifest.json` 的文件夹，而不是它的上一级目录。
+   ```text
+   dist-safari/AI Chat Markdown Exporter Safari/AI Chat Markdown Exporter Safari.xcodeproj
+   ```
 
-### 方式 B：开发者构建后加载
+3. 在 Xcode 中选择 `AI Chat Markdown Exporter Safari (macOS)` scheme，然后 Run。
+4. 在 Safari 中打开 `开发` 菜单并启用 `允许未签名扩展`。
+5. 打开 Safari 设置的 `扩展` 面板，勾选 `AI Chat Markdown Exporter Safari`。
+6. 打开 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包的聊天页面，点击工具栏扩展图标导出。
 
-如果你已经安装 Node.js，也可以先构建一个干净的 `dist/` 目录再加载：
-
-```bash
-npm run verify
-npm run build
-```
-
-然后在 `chrome://extensions` 或 `edge://extensions` 里点击“加载已解压的扩展程序”，选择生成的 `dist/` 文件夹。
-
-项目没有外部 npm 依赖，`npm run verify` 会先跑测试，再构建 `dist/`。
-
-## 安装后第一次使用
-
-1. 在浏览器右上角点击拼图形状的“扩展程序”按钮。
-2. 找到 `AI Chat Markdown Exporter`。
-3. 建议点击图钉，把它固定到工具栏。
-4. 打开一个已支持平台的聊天页面，例如 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问。
-5. 点击工具栏里的扩展图标。
-6. 直接点击 `导出当前聊天为 Markdown`。
-
-默认情况下，扩展会把文件保存到浏览器当前设置的默认下载目录下：
+Safari 版复用同一份 WebExtension 源码；扩展页面同时兼容 `chrome.*` 回调 API 和 `browser.*` Promise API。Safari 当前不支持本扩展依赖的 `downloads` API，所以 `npm run build:safari` 会为 Safari 构建移除 `downloads` 权限、加入 `nativeMessaging`，并让 Xcode 包装 App 的 native handler 直接写入固定导出根目录：
 
 ```text
-浏览器默认下载目录/
-  ChatGPT/
-  Claude/
-  Gemini/
-  Grok/
-  DeepSeek/
-  Doubao/
-  Qwen/
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History
 ```
 
-如果你想改到其他文件夹，再点击 `自定义导出目录`，选择本地目录并允许写入。
-
-## 导出路径设置
-
-扩展有两种导出路径模式：
-
-- 默认模式：写入浏览器默认下载目录，不需要首次选择目录。
-- 自定义模式：点击 `自定义导出目录` 后，写入你选择的本地文件夹。
-
-自定义模式会在你选择的目录下按平台创建子文件夹，例如：
-
-```text
-你选择的目录/
-  ChatGPT/
-  Claude/
-  Gemini/
-  Grok/
-  DeepSeek/
-  Doubao/
-  Qwen/
-```
-
-自定义目录功能依赖 Chromium 的 File System Access API，因此请使用新版 Chrome 或 Edge。目录选择只会在你主动点击 `自定义导出目录` 时出现；后续导出不会主动弹出二次目录询问。若浏览器或系统让这个目录授权失效，扩展会提示你重新点击 `自定义导出目录` 授权。
-
-如果已经设置过自定义目录，想改回浏览器默认下载目录，点击 `使用默认下载目录` 即可。
-
-默认下载目录由浏览器控制。你可以在 Chrome / Edge 的下载设置里修改默认下载位置，扩展会跟随浏览器设置，不会读取或显示系统里的绝对路径。
-
-## 导出当前聊天
-
-1. 打开一个已支持平台的具体聊天页面。
-2. 点击扩展图标。
-3. 点击 `导出当前聊天为 Markdown`。
-4. 成功后，文件会写入默认下载目录或你自定义的导出目录。
-
-默认模式下的路径类似：
-
-```text
-浏览器默认下载目录/
-  Claude/
-    2026-04-08_Claude_环路积分符号怎么理解.md
-```
-
-自定义模式下的路径类似：
-
-```text
-你选择的目录/
-  Claude/
-    2026-04-08_Claude_环路积分符号怎么理解.md
-```
-
-文件名规则：
-
-```text
-2026-04-08_Claude_环路积分符号怎么理解.md
-Claude_环路积分符号怎么理解.md
-```
-
-如果平台暴露了真实聊天时间，文件名前缀会使用聊天日期；否则省略日期。扩展不会用导出当天日期补位。
+导出的文件仍会按平台写入相对目录，例如 `ChatGPT/...md`、`Claude/...md`。生成的本地调试 Xcode 项目会关闭 App Sandbox，方便写入这个 Obsidian iCloud 目录；如果之后要上架或分发，需要重新设计成用户选择目录或 security-scoped bookmark。
 
 ## 批量导出账号历史
 
-批量导出器复用单条聊天导出逻辑，不调用官方归档导出。
+批量导出器复用当前聊天导出逻辑，不调用官方归档导出。ChatGPT 导出会使用登录态网页端同源的会话 API，因此在接口返回时可以保留消息创建时间。
 
-1. 打开已登录的 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问页面。
+1. 打开已登录的 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包页面。
 2. 点击扩展图标。
 3. 点击 `批量导出账号历史`。
-4. 如果要使用默认下载目录，直接点击 `扫描历史列表`。
-5. 如果要导出到其他位置，先点击 `自定义导出目录`。
-6. 扫描完成后点击 `开始导出`。
+4. 在批量控制台点击 `扫描历史列表`。
+5. 确认发现的队列后，点击 `开始导出`。
 
-批量导出说明：
+平台说明：
 
-- ChatGPT：逐个打开聊天后，优先从登录态网页端会话 API 读取结构化内容和消息时间。
-- Claude、Grok、DeepSeek、豆包、千问：扩展会拦截网页应用暴露的会话响应，并结合 DOM 抽取结果导出。
-- Gemini：会尝试从搜索/历史列表读取可见日期，单条导出时也会用临时后台标签页补全聊天日期。
-- 长聊天会在导出前滚动页面，让较早消息有机会加载。
-- 扫描会对比已导出记录，优先按 `platform + conversation_id` 去重，其次按 `platform + source_url`，最后按文件名。
-- 如果之前导出的聊天后来新增了消息，批量导出会按消息数量尝试识别更新并覆盖旧文件名。
-- `清空本次队列` 只清空当前批量状态。`清空兼容记录` 会重置导出记录，让下一轮允许重新导出全部聊天。
+- ChatGPT：逐个打开聊天后，从结构化会话 JSON 导出；网页 API 返回时会保留会话和每条消息的创建时间。
+- Claude、Grok、DeepSeek、豆包：扩展会尽量拦截登录态网页应用的会话响应，保存在短期内存结构化缓存中，并用它增强 DOM 导出结果，以保留真实会话和消息时间。
+- Gemini：扫描器会直接打开 Gemini 搜索列表，用每条搜索结果右侧可见日期作为 `conversation_time`；近期登录态网页历史响应也会作为时间戳兜底。单条聊天导出会在保存当前聊天前，用临时后台标签页执行同样的查找。若可见日期不可用，Gemini 仍可回退到已拦截的会话响应，同时继续忽略导出时间。
+- Claude：扫描器会先尝试打开侧边栏搜索/历史列表，再持续滚动，直到没有新聊天链接出现。标题和可见列表日期会作为导出的会话标题/时间。
+- Grok：扫描器会先尝试点击侧边栏的 `查看全部` / `View all` 历史按钮，再滚动历史列表页。
+- DeepSeek 和豆包：扫描器使用可见侧边栏/搜索历史链接；当前聊天导出则使用 DOM 抽取，并在网页应用暴露会话数据时用结构化 API 信息增强结果。
+- 导出范围仅限当前账号可在网页 UI 中加载的聊天。已删除、私密、隐藏或受账号策略限制的聊天无法通过这个浏览器驱动流程导出。
+- 长聊天会逐个打开，并在导出前滚动页面，让较早的 DOM 内容有机会加载。
+- 后续批量扫描会把发现的聊天与本机导出目录下已有 Markdown 文件对比，只把去重后的剩余项放入本轮导出队列。去重优先使用 Markdown 元数据里的 `platform + conversation_id`，其次使用 `platform + source_url`，最后才回退到文件名匹配。扩展会合并 Chrome 下载历史和本地生成的 `src/exported-markdown-index.json` 快照；该文件已被 Git 忽略，不会把聊天标题、URL 或 conversation ID 提交到仓库。如果手动移动或新增了导出文件，运行 `npm run refresh:export-index` 后重新加载扩展即可更新快照。
+- 成功导出仍会写入本地兼容记录，用于进度显示和兼容旧扩展状态；跨轮去重不再依赖该记录。
+- 同一批队列再次运行时，会跳过已经标记为 `成功` 或 `已跳过` 的行；失败行可以重试。
+- `清空本次队列` 会保留兼容记录。`清空兼容记录` 会重置兼容记录，把当前队列全部改为 `待导出`，并允许下一次开始导出时重新下载所有聊天，即使已有匹配文件。
 
-导出范围取决于网页端当前账号能够加载到的历史。已删除、隐藏、受账号策略限制或网页 UI 无法加载的聊天无法通过这个流程导出。
+批量下载会保存到对应平台文件夹，例如：
 
-## 调试快照
+```text
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/Claude/
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/Gemini/
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/Grok/
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/ChatGPT/
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/DeepSeek/
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/Doubao/
+```
 
-如果某个平台导出失败：
+## 文件名规则
 
-1. 停留在失败的聊天页面。
-2. 点击扩展图标。
-3. 点击 `下载页面调试快照`。
-4. 将生成的 JSON 用于调整适配器。
+如果能取得真实会话时间：
 
-调试快照只包含页面选择器和文本样本，不会主动导出完整聊天 Markdown。
+```text
+2026-04-08_Claude_环路积分符号怎么理解.md
+```
 
-## 本地检查
+如果无法取得真实会话时间：
 
-检查某个导出目录下的 Markdown：
+```text
+Claude_环路积分符号怎么理解.md
+```
+
+扩展永远不会把导出时间用作文件名日期。
+
+## 验收清单
+
+每个平台都建议检查：
+
+1. 打开一个已有会话。
+2. 导出该会话。
+3. 确认文件名可读，且不是 `untitled`。
+4. 确认 YAML front matter 开头有 `status: raw`。
+5. 确认 YAML front matter 和可见 Metadata 区域都有 `platform`。
+6. 确认 YAML front matter 和可见 Metadata 区域都有 `needs_media`。
+7. 确认只有当平台暴露真实聊天/消息时间时，才出现 `conversation_time`。
+8. 确认没有 `exported_at` 或其他导出时间字段。
+9. 确认每轮 User / Assistant 共用同一个轮次编号，例如 `Message 1 - User` 后接 `Message 1 - Assistant`，再接 `Message 2 - User` 和 `Message 2 - Assistant`。
+
+如果某个平台仍然导出失败，请停留在失败的聊天页面，并在弹窗里点击 `下载页面调试快照`。快照会保存到：
+
+```text
+/Users/mayifan/Downloads/AI Chat Export Debug
+```
+
+快照只包含页面选择器和文本样本，方便调整适配器，不需要分享完整聊天记录。
+
+每个平台各导出一个聊天后，运行：
+
+```bash
+npm run check:exports
+```
+
+默认检查目录为：
+
+```text
+/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History
+```
+
+也可以传入自定义导出目录：
 
 ```bash
 node scripts/check-exported-files.mjs "/path/to/export/folder"
 ```
 
-也可以设置环境变量：
+只检查本次导出的样例目录时，可以跳过“必须包含所有平台”的要求：
 
 ```bash
-AI_CHAT_EXPORT_ROOT="/path/to/export/folder" npm run check:exports
+node scripts/check-exported-files.mjs "/path/to/export/folder" --allow-partial
 ```
 
-更新本地已导出文件快照：
-
-```bash
-AI_CHAT_EXPORT_ROOT="/path/to/export/folder" npm run refresh:export-index
-```
-
-如果没有设置 `AI_CHAT_EXPORT_ROOT`，构建会生成一个空的 `src/exported-markdown-index.json`，不会把个人导出路径写进仓库。
-
-## 开发命令
+## 开发
 
 ```bash
 npm run test
 npm run build
+npm run build:safari
+npm run verify:safari-export
 npm run verify
+npm run check:exports
 ```
 
-`npm run verify` 会先跑测试，再构建 `dist/`。
+项目没有外部 npm 依赖。

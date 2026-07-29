@@ -32,7 +32,6 @@ async function loadBrowserCore() {
     "src/content/adapters/grok.js",
     "src/content/adapters/deepseek.js",
     "src/content/adapters/doubao.js",
-    "src/content/adapters/qwen.js",
     "src/content/history-discovery.js"
   ]) {
     const source = await readFile(join(projectRoot, file), "utf8");
@@ -154,7 +153,7 @@ async function collectInterceptorMessages(url, payload, options = {}) {
   return posted;
 }
 
-async function listExportedFilesWithHarness(downloadItems, snapshot = null, storage = {}) {
+async function listExportedFilesWithHarness(downloadItems, snapshot = null) {
   let listener = null;
   const context = {
     URL,
@@ -173,19 +172,6 @@ async function listExportedFilesWithHarness(downloadItems, snapshot = null, stor
       downloads: {
         search(_query, callback) {
           callback(downloadItems);
-        }
-      },
-      storage: {
-        local: {
-          get(key) {
-            const keys = Array.isArray(key) ? key : [key];
-            return Promise.resolve(keys.reduce((output, item) => {
-              if (Object.prototype.hasOwnProperty.call(storage, item)) {
-                output[item] = storage[item];
-              }
-              return output;
-            }, {}));
-          }
         }
       },
       runtime: {
@@ -257,20 +243,11 @@ async function downloadTextWithHarness(message) {
   return { response, downloadOptions };
 }
 
-const TEST_EXPORT_ROOT = "/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History";
-const TEST_EXPORT_SETTINGS = {
-  aiChatExporterSettings: {
-    exportMode: "file-system-access",
-    exportRootLabel: TEST_EXPORT_ROOT,
-    exportRootName: "AI Chat History"
-  }
-};
-
 function markdownDownloadItem(relativePath, markdown) {
   return {
     id: 1,
     exists: true,
-    filename: `${TEST_EXPORT_ROOT}/${relativePath}`,
+    filename: `/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History/${relativePath}`,
     url: `data:text/markdown;charset=utf-8;base64,${Buffer.from(markdown, "utf8").toString("base64")}`
   };
 }
@@ -282,7 +259,6 @@ const geminiConfig = await loadAdapterConfig("src/content/adapters/gemini.js", "
 const grokConfig = await loadAdapterConfig("src/content/adapters/grok.js", "GrokAdapter");
 const deepSeekConfig = await loadAdapterConfig("src/content/adapters/deepseek.js", "DeepSeekAdapter");
 const doubaoConfig = await loadAdapterConfig("src/content/adapters/doubao.js", "DoubaoAdapter");
-const qwenConfig = await loadAdapterConfig("src/content/adapters/qwen.js", "QwenAdapter");
 
 function textNode(value) {
   return {
@@ -565,11 +541,8 @@ assert.equal(PlatformUtils.detectPlatformFromUrl("https://grok.com/chat/123").id
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://x.com/i/grok").id, "grok");
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://chat.deepseek.com/a/chat/s/123456789").id, "deepseek");
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://www.doubao.com/chat/123456789").id, "doubao");
-assert.equal(PlatformUtils.detectPlatformFromUrl("https://chat.qwen.ai/chat/123456789").id, "qwen");
-assert.equal(PlatformUtils.detectPlatformFromUrl("https://tongyi.aliyun.com/qianwen/").id, "qwen");
 assert.equal(PlatformUtils.detectPlatformFromUrl("https://example.com"), null);
 assert.equal(PlatformUtils.isGenericConversationTitle("与 Gemini 对话", "Gemini"), true);
-assert.equal(PlatformUtils.isGenericConversationTitle("与 Qwen 对话", "Qwen"), true);
 assert.equal(PlatformUtils.isGenericConversationTitle("环路积分符号怎么理解", "Gemini"), false);
 assert.equal(
   BatchHistory.normalizeConversationUrl("https://chatgpt.com/c/abc123456789?model=gpt-4#bottom"),
@@ -598,10 +571,6 @@ assert.equal(
 assert.equal(
   BatchHistory.normalizeConversationUrl("https://www.doubao.com/chat/doubao123456789?enter_from=sidebar"),
   "https://www.doubao.com/chat/doubao123456789"
-);
-assert.equal(
-  BatchHistory.normalizeConversationUrl("https://chat.qwen.ai/chat/qwen123456789?from=history"),
-  "https://chat.qwen.ai/chat/qwen123456789"
 );
 assert.equal(BatchHistory.normalizeConversationUrl("https://grok.com/share/not-account-history"), "");
 assert.equal(BatchHistory.conversationIdFromUrl("https://claude.ai/chat/abc123456789"), "abc123456789");
@@ -644,7 +613,7 @@ conversation_id: "geminimetadata123"
 - Source URL: https://gemini.google.com/app/geminimetadata123
 - Conversation ID: geminimetadata123
 `)
-], null, TEST_EXPORT_SETTINGS);
+]);
 assert.equal(exportedFileList.ok, true);
 assert.equal(exportedFileList.files.length, 1);
 assert.equal(exportedFileList.files[0].metadata.platform, "Gemini");
@@ -652,27 +621,6 @@ assert.equal(exportedFileList.files[0].metadata.sourceUrl, "https://gemini.googl
 assert.equal(exportedFileList.files[0].metadata.conversationId, "geminimetadata123");
 assert.equal(exportedFileList.files[0].metadata.title, "真实 Gemini 标题");
 assert.equal(exportedFileList.files[0].metadata.needsMedia, "false");
-
-const defaultDownloadsFileList = await listExportedFilesWithHarness([
-  {
-    id: 2,
-    exists: true,
-    filename: "/Users/example/Downloads/Gemini/2026-03-19_Gemini_默认下载目录.md",
-    url: `data:text/markdown;charset=utf-8;base64,${Buffer.from(`---
-status: raw
-needs_media: false
-platform: "Gemini"
-source_url: "https://gemini.google.com/app/defaultdownloads123"
-conversation_title: "默认下载目录"
-conversation_id: "defaultdownloads123"
----
-`, "utf8").toString("base64")}`
-  }
-]);
-assert.equal(defaultDownloadsFileList.ok, true);
-assert.equal(defaultDownloadsFileList.root, "浏览器默认下载目录");
-assert.equal(defaultDownloadsFileList.files.length, 1);
-assert.equal(defaultDownloadsFileList.files[0].relativePath, "Gemini/2026-03-19_Gemini_默认下载目录.md");
 
 const exportedFileSnapshotList = await listExportedFilesWithHarness([], {
   version: 1,
@@ -690,33 +638,12 @@ const exportedFileSnapshotList = await listExportedFilesWithHarness([], {
       }
     }
   ]
-}, TEST_EXPORT_SETTINGS);
+});
 assert.equal(exportedFileSnapshotList.ok, true);
 assert.equal(exportedFileSnapshotList.sources.downloads, 0);
 assert.equal(exportedFileSnapshotList.sources.snapshot, 1);
 assert.equal(exportedFileSnapshotList.files.length, 1);
 assert.equal(exportedFileSnapshotList.files[0].metadata.platform, "Claude");
-
-const exportedFileRegistryList = await listExportedFilesWithHarness([], null, {
-  ...TEST_EXPORT_SETTINGS,
-  aiChatExporterExportRegistry: {
-    version: 1,
-    items: {
-      "Qwen:qwen-registry-123456789": {
-        platform: "Qwen",
-        conversationId: "qwen-registry-123456789",
-        url: "https://chat.qwen.ai/chat/qwen-registry-123456789",
-        title: "Qwen registry export",
-        filename: "2026-04-17_Qwen_registry_export.md",
-        relativePath: "Qwen/2026-04-17_Qwen_registry_export.md",
-        messageCount: 2
-      }
-    }
-  }
-});
-assert.equal(exportedFileRegistryList.ok, true);
-assert.equal(exportedFileRegistryList.sources.registry, 1);
-assert.equal(exportedFileRegistryList.files[0].metadata.platform, "Qwen");
 
 const markdownDownload = await downloadTextWithHarness({
   type: "DOWNLOAD_MARKDOWN",
@@ -726,16 +653,6 @@ const markdownDownload = await downloadTextWithHarness({
 });
 assert.equal(markdownDownload.response.ok, true);
 assert.equal(markdownDownload.downloadOptions.filename, "Claude/2026-04-12_Claude_聊天记录导出缺少时间戳.md");
-
-const defaultDownloadsMarkdown = await downloadTextWithHarness({
-  type: "DOWNLOAD_MARKDOWN",
-  filename: "2026-04-12_Claude_聊天记录导出缺少时间戳.md",
-  markdown: "# Test",
-  folder: "Claude"
-});
-assert.equal(defaultDownloadsMarkdown.response.ok, true);
-assert.equal(defaultDownloadsMarkdown.downloadOptions.filename, "Claude/2026-04-12_Claude_聊天记录导出缺少时间戳.md");
-assert.equal(defaultDownloadsMarkdown.response.relativePath, "Claude/2026-04-12_Claude_聊天记录导出缺少时间戳.md");
 
 assert.equal(geminiConfig.platformLabel, "Gemini");
 assert.equal(geminiConfig.preferVisibleHistoryConversationTime, true);
@@ -748,7 +665,6 @@ assert.equal(grokConfig.allowDocumentTime, false);
 assert.equal(grokConfig.allowScriptTime, false);
 assert.equal(deepSeekConfig.platformLabel, "DeepSeek");
 assert.equal(doubaoConfig.platformLabel, "Doubao");
-assert.equal(qwenConfig.platformLabel, "Qwen");
 assert.equal(BatchHistory.firstMatchDate("洗车店距离问题 2026年4月10日").date, "2026-04-10");
 assert.equal(BatchHistory.firstMatchDate("Troubleshooting VMware Apr 9, 2026").date, "2026-04-09");
 assert.equal(AdapterCommon.readTimeCandidate("1712591700"), "2024-04-08T15:55:00.000Z");
@@ -1491,49 +1407,6 @@ assert.equal(doubaoFallbackConversation.messages[1].content, "Doubao fallback DO
 assert.ok(doubaoFetchCalls.some((call) => call.init.method === "POST" && call.init.body && call.init.body.includes("\"cmd\":3200")));
 delete browserGlobal.fetch;
 delete browserGlobal.performance;
-
-const qwenInterceptorMessages = await collectInterceptorMessages(
-  "https://chat.qwen.ai/api/v1/chats/qwen-api-123456789/messages",
-  {
-    conversationId: "qwen-api-123456789",
-    title: "Qwen API",
-    createdAt: "2026-04-17T08:00:00.000Z",
-    messages: [
-      {
-        role: "user",
-        createdAt: "2026-04-17T08:00:01.000Z",
-        content: "Qwen question"
-      },
-      {
-        role: "assistant",
-        createdAt: "2026-04-17T08:00:02.000Z",
-        content: "Qwen answer"
-      }
-    ]
-  }
-);
-const qwenStructuredMessage = qwenInterceptorMessages.find((message) => message.type === "AI_CHAT_EXPORTER_STRUCTURED_CONVERSATION");
-assert.equal(qwenStructuredMessage.conversation.platform, "Qwen");
-assert.equal(qwenStructuredMessage.conversation.conversationId, "qwen-api-123456789");
-assert.equal(qwenStructuredMessage.conversation.conversationTime, "2026-04-17T08:00:00.000Z");
-assert.equal(qwenStructuredMessage.conversation.messages[1].content, "Qwen answer");
-
-testNodeOrder = 0;
-const qwenDomRoot = element("main", {}, [
-  element("div", { "data-role": "user" }, [textNode("Qwen DOM question")]),
-  element("div", { "data-role": "assistant" }, [
-    element("div", { class: "markdown" }, [
-      element("p", {}, [textNode("Qwen DOM answer")])
-    ])
-  ])
-]);
-browserGlobal.document = documentFrom(qwenDomRoot, "Qwen DOM - Qwen");
-browserGlobal.location = { href: "https://chat.qwen.ai/chat/qwen-dom-123456789" };
-const qwenDomConversation = await browserCore.QwenAdapter.extract();
-assert.equal(qwenDomConversation.platform, "Qwen");
-assert.equal(qwenDomConversation.conversationId, "qwen-dom-123456789");
-assert.equal(qwenDomConversation.messages[0].content, "Qwen DOM question");
-assert.equal(qwenDomConversation.messages[1].content, "Qwen DOM answer");
 
 const geminiJsonInterceptorMessages = await collectInterceptorMessages(
   "https://gemini.google.com/_/BardChatUi/data/batchexecute",

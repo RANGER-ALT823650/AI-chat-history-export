@@ -1,20 +1,35 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, join, relative, resolve } from "node:path";
 
-const targetArg = process.argv[2] || process.env.AI_CHAT_EXPORT_ROOT || "";
-if (!targetArg) {
-  console.error("Usage: node scripts/check-exported-files.mjs \"/path/to/export/folder\"");
-  console.error("Or set AI_CHAT_EXPORT_ROOT before running npm run check:exports.");
-  process.exit(1);
-}
+const args = process.argv.slice(2);
+const allowPartial = args.includes("--allow-partial");
+const targetArg = args.find((arg) => arg !== "--allow-partial");
 
-const targetDir = resolve(targetArg);
+const targetDir = targetArg
+  ? resolve(targetArg)
+  : join(homedir(), "Library", "Mobile Documents", "iCloud~md~obsidian", "Documents", "同步", "10_Raw", "AI Chat History");
 
-const requiredPlatforms = new Set(["ChatGPT", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "Qwen"]);
+const requiredPlatforms = new Set(["ChatGPT", "Claude", "Gemini", "Grok"]);
 
-async function listMarkdownFiles(dir) {
-  const entries = await readdir(dir);
-  return entries.filter((entry) => entry.toLowerCase().endsWith(".md"));
+async function listMarkdownFiles(root, current = root) {
+  const entries = await readdir(current, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    if (entry.name === ".DS_Store") {
+      continue;
+    }
+
+    const fullPath = join(current, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listMarkdownFiles(root, fullPath));
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+      files.push(fullPath);
+    }
+  }
+
+  return files;
 }
 
 function readPlatform(markdown) {
@@ -111,14 +126,15 @@ const seenPlatforms = new Set();
 let failureCount = 0;
 
 for (const file of files) {
-  const fullPath = join(targetDir, file);
-  const markdown = await readFile(fullPath, "utf8");
-  if (isReferenceExample(file, markdown)) {
-    console.log(`SKIP ${file}: reference example`);
+  const markdown = await readFile(file, "utf8");
+  const displayPath = relative(targetDir, file).replace(/\\/g, "/");
+  const fileBasename = basename(file);
+  if (isReferenceExample(fileBasename, markdown)) {
+    console.log(`SKIP ${displayPath}: reference example`);
     continue;
   }
 
-  const result = validateFile(file, markdown);
+  const result = validateFile(fileBasename, markdown);
 
   if (result.platform) {
     seenPlatforms.add(result.platform);
@@ -126,13 +142,13 @@ for (const file of files) {
 
   if (result.errors.length) {
     failureCount += 1;
-    console.error(`FAIL ${file}: ${result.errors.join(", ")}`);
+    console.error(`FAIL ${displayPath}: ${result.errors.join(", ")}`);
   } else {
-    console.log(`PASS ${file}: ${result.platform}`);
+    console.log(`PASS ${displayPath}: ${result.platform}`);
   }
 }
 
-const missingPlatforms = Array.from(requiredPlatforms).filter((platform) => !seenPlatforms.has(platform));
+const missingPlatforms = allowPartial ? [] : Array.from(requiredPlatforms).filter((platform) => !seenPlatforms.has(platform));
 if (missingPlatforms.length) {
   failureCount += 1;
   console.error(`Missing platform exports: ${missingPlatforms.join(", ")}`);

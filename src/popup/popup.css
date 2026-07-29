@@ -28,18 +28,6 @@ h1 {
   line-height: 1.4;
 }
 
-.path-panel {
-  margin: 0 0 12px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas);
-  border-radius: 8px;
-}
-
-.path-panel .muted {
-  margin-bottom: 8px;
-  overflow-wrap: anywhere;
-}
-
 button {
   width: 100%;
   border: 1px solid color-mix(in srgb, CanvasText 24%, Canvas);

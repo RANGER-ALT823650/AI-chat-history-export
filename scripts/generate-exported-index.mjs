@@ -1,10 +1,13 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 const projectRoot = new URL("..", import.meta.url).pathname;
-const targetArg = process.argv[2] || process.env.AI_CHAT_EXPORT_ROOT || "";
-const targetRoot = targetArg ? resolve(targetArg) : "";
-const outputPath = join(projectRoot, "src", "exported-markdown-index.json");
+const defaultRoot = join(homedir(), "Library", "Mobile Documents", "iCloud~md~obsidian", "Documents", "同步", "10_Raw", "AI Chat History");
+const targetRoot = process.argv[2] ? resolve(process.argv[2]) : defaultRoot;
+const outputPath = process.env.AI_CHAT_EXPORT_INDEX_OUTPUT
+  ? resolve(process.env.AI_CHAT_EXPORT_INDEX_OUTPUT)
+  : join(projectRoot, "src", "exported-markdown-index.json");
 
 function unescapeMetadataValue(value) {
   let clean = String(value || "").trim();
@@ -91,7 +94,7 @@ async function listMarkdownFiles(root, current = root) {
   return files;
 }
 
-const markdownFiles = targetRoot ? await listMarkdownFiles(targetRoot) : [];
+const markdownFiles = await listMarkdownFiles(targetRoot);
 const files = [];
 
 for (const filename of markdownFiles.sort()) {
@@ -115,8 +118,4 @@ const payload = {
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
-if (targetRoot) {
-  console.log(`Indexed ${files.length} exported Markdown files at ${outputPath}`);
-} else {
-  console.log(`No export root configured; wrote an empty exported Markdown index at ${outputPath}`);
-}
+console.log(`Indexed ${files.length} exported Markdown files at ${outputPath}`);

@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  const extensionApi = globalThis.chrome || globalThis.browser;
+  if (!extensionApi) {
+    throw new Error("Browser extension API is not available.");
+  }
+  const chrome = extensionApi;
   const CONTENT_FILES = [
     "src/content/platform-utils.js",
     "src/content/timestamp-cache.js",
@@ -12,7 +17,6 @@
     "src/content/adapters/grok.js",
     "src/content/adapters/deepseek.js",
     "src/content/adapters/doubao.js",
-    "src/content/adapters/qwen.js",
     "src/content/adapters/claude.js",
     "src/content/history-discovery.js",
     "src/content/content.js"
@@ -22,6 +26,7 @@
   ];
   const EXPORT_REGISTRY_KEY = "aiChatExporterExportRegistry";
   const MAIN_WORLD_SCRIPT_ID = "ai-chat-exporter-main-world-interceptor";
+  const EXPORTED_MARKDOWN_ROOT = "/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History";
   const SUPPORTED_MATCHES = [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
@@ -35,27 +40,14 @@
     "https://deepseek.com/*",
     "https://*.deepseek.com/*",
     "https://doubao.com/*",
-    "https://*.doubao.com/*",
-    "https://qwen.ai/*",
-    "https://*.qwen.ai/*",
-    "https://qwenlm.ai/*",
-    "https://*.qwenlm.ai/*",
-    "https://qianwen.com/*",
-    "https://*.qianwen.com/*",
-    "https://tongyi.aliyun.com/*",
-    "https://qianwen.aliyun.com/*"
+    "https://*.doubao.com/*"
   ];
-  const exportPath = window.AIChatExporterExportPath;
 
   const platformElement = document.getElementById("platform");
-  const pathElement = document.getElementById("exportPath");
-  const choosePathButton = document.getElementById("choosePathButton");
-  const defaultPathButton = document.getElementById("defaultPathButton");
   const statusElement = document.getElementById("status");
   const exportButton = document.getElementById("exportButton");
   const batchButton = document.getElementById("batchButton");
   const debugButton = document.getElementById("debugButton");
-  let exportDirectoryReady = false;
 
   function detectPlatform(urlLike) {
     try {
@@ -86,58 +78,11 @@
       if (host === "doubao.com" || host.endsWith(".doubao.com")) {
         return "Doubao";
       }
-
-      if (
-        host === "qwen.ai" ||
-        host.endsWith(".qwen.ai") ||
-        host === "qwenlm.ai" ||
-        host.endsWith(".qwenlm.ai") ||
-        host === "qianwen.com" ||
-        host.endsWith(".qianwen.com") ||
-        host === "tongyi.aliyun.com" ||
-        host === "qianwen.aliyun.com"
-      ) {
-        return "Qwen";
-      }
     } catch (_error) {
       return "";
     }
 
     return "";
-  }
-
-  async function refreshExportPathStatus() {
-    if (!exportPath || !exportPath.isSupported()) {
-      pathElement.textContent = "导出目录：当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。";
-      choosePathButton.disabled = true;
-      defaultPathButton.disabled = true;
-      return false;
-    }
-
-    const label = await exportPath.exportRootLabel();
-    const hasDirectory = await exportPath.hasExportDirectory();
-    exportDirectoryReady = hasDirectory;
-    pathElement.textContent = hasDirectory
-      ? `导出目录：${label}`
-      : `导出目录：${label}（自定义目录权限不可用，请重新选择）`;
-    choosePathButton.disabled = !exportPath.canPickExportDirectory || !exportPath.canPickExportDirectory();
-    defaultPathButton.disabled = false;
-    return hasDirectory;
-  }
-
-  async function ensureExportDirectory(options = {}) {
-    if (!exportPath || !exportPath.isSupported()) {
-      throw new Error("当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。");
-    }
-
-    const ready = options.requestPermission === false
-      ? await exportPath.hasExportDirectory()
-      : await exportPath.requestExportDirectoryAccess();
-    if (!ready) {
-      exportDirectoryReady = false;
-      await refreshExportPathStatus();
-      throw new Error("导出目录权限未授权，请点击“自定义导出目录”重新选择或改用默认下载目录。");
-    }
   }
 
   function conversationIdFromUrl(urlLike) {
@@ -394,11 +339,10 @@
     const platform = tab && tab.url ? detectPlatform(tab.url) : "";
 
     if (!platform) {
-      platformElement.textContent = "当前页面暂不支持。请打开 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问的聊天页。";
+      platformElement.textContent = "当前页面暂不支持。请打开 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包的聊天页。";
       exportButton.disabled = true;
       batchButton.disabled = true;
       debugButton.disabled = true;
-      await refreshExportPathStatus();
       return;
     }
 
@@ -406,69 +350,31 @@
     exportButton.disabled = false;
     batchButton.disabled = false;
     debugButton.disabled = false;
-    await refreshExportPathStatus();
   }
-
-  choosePathButton.addEventListener("click", async () => {
-    choosePathButton.disabled = true;
-    statusElement.textContent = "请选择 Markdown 导出目录...";
-
-    try {
-      await exportPath.pickExportDirectory();
-      await refreshExportPathStatus();
-      statusElement.textContent = "导出目录已保存。";
-    } catch (error) {
-      statusElement.textContent = error && error.message ? error.message : String(error);
-    } finally {
-      choosePathButton.disabled = false;
-    }
-  });
-
-  defaultPathButton.addEventListener("click", async () => {
-    defaultPathButton.disabled = true;
-    statusElement.textContent = "正在切换到浏览器默认下载目录...";
-
-    try {
-      await exportPath.useDefaultDownloadDirectory();
-      await refreshExportPathStatus();
-      statusElement.textContent = "已切换为浏览器默认下载目录。";
-    } catch (error) {
-      statusElement.textContent = error && error.message ? error.message : String(error);
-    } finally {
-      defaultPathButton.disabled = false;
-    }
-  });
 
   exportButton.addEventListener("click", async () => {
     exportButton.disabled = true;
-    statusElement.textContent = "正在准备导出目录...";
+    statusElement.textContent = "正在读取聊天内容...";
 
     try {
-      await ensureExportDirectory();
-      statusElement.textContent = "正在读取聊天内容...";
       const result = await exportCurrentChat();
       if (!result || !result.ok) {
         throw new Error((result && result.error) || "导出失败。");
       }
 
-      const written = await exportPath.writeMarkdownFile({
-        platform: result.platform || "AI",
+      const download = await chrome.runtime.sendMessage({
+        type: "DOWNLOAD_MARKDOWN",
         filename: result.filename,
         markdown: result.markdown,
-        conflictAction: "uniquify",
-        title: result.title || "",
-        sourceUrl: result.sourceUrl || "",
-        conversationId: result.conversationId || "",
-        conversationTime: result.conversationTime || "",
-        messageCount: result.messageCount || 0
+        folder: `${EXPORTED_MARKDOWN_ROOT}/${result.platform || "AI"}`
       });
 
-      if (!written || !written.ok) {
-        throw new Error((written && written.error) || "写入 Markdown 失败。");
+      if (!download || !download.ok) {
+        throw new Error((download && download.error) || "下载失败。");
       }
 
       const timeNote = result.hasConversationTime ? "已写入聊天时间。" : "页面未提供聊天时间，已按要求省略。";
-      statusElement.textContent = `已导出 ${result.messageCount} 条消息到 ${written.relativePath}。${timeNote}`;
+      statusElement.textContent = `已导出 ${result.messageCount} 条消息。${timeNote}`;
     } catch (error) {
       statusElement.textContent = error && error.message ? error.message : String(error);
     } finally {

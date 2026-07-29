@@ -2,6 +2,7 @@
   "use strict";
 
   var namespace = (global.AIChatExporter = global.AIChatExporter || {});
+  var extensionApi = global.chrome || global.browser;
 
   var MESSAGE_TYPE = "AI_CHAT_EXPORTER_TIMESTAMP";
   var GEMINI_DEBUG_MESSAGE_TYPE = "AI_CHAT_EXPORTER_GEMINI_DEBUG";
@@ -19,14 +20,90 @@
   // Persistence via chrome.storage.local
   // ---------------------------------------------------------------------------
 
-  function loadCacheFromStorage() {
+  function storageArea() {
+    return extensionApi && extensionApi.storage && extensionApi.storage.local
+      ? extensionApi.storage.local
+      : null;
+  }
+
+  function runtimeLastError() {
+    return extensionApi && extensionApi.runtime && extensionApi.runtime.lastError
+      ? extensionApi.runtime.lastError
+      : null;
+  }
+
+  function callbackUnsupported(error) {
+    var message = error && error.message ? error.message : String(error || "");
+    return /callback|argument|too many|does not accept/i.test(message);
+  }
+
+  function storageGet(key, callback) {
+    var area = storageArea();
+    if (!area || !area.get) {
+      return;
+    }
+
+    var done = false;
+    var finish = function (result) {
+      if (done) {
+        return;
+      }
+
+      done = true;
+      callback(result || {});
+    };
+    var retryWithoutCallback = function () {
+      try {
+        Promise.resolve(area.get(key)).then(finish, function () { finish({}); });
+      } catch (_promiseError) {
+        finish({});
+      }
+    };
+
     try {
-      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(CACHE_STORAGE_KEY, function (result) {
-          if (chrome.runtime.lastError) {
+      var maybePromise = area.get(key, function (result) {
+        if (runtimeLastError()) {
+          finish({});
+          return;
+        }
+
+        finish(result);
+      });
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(finish, function (error) {
+          if (callbackUnsupported(error)) {
+            retryWithoutCallback();
             return;
           }
 
+          finish({});
+        });
+      }
+    } catch (_callbackError) {
+      retryWithoutCallback();
+    }
+  }
+
+  function storageSet(value) {
+    var area = storageArea();
+    if (!area || !area.set) {
+      return;
+    }
+
+    try {
+      var maybePromise = area.set(value);
+      if (maybePromise && typeof maybePromise.catch === "function") {
+        maybePromise.catch(function () {});
+      }
+    } catch (_error) {
+      // Storage access error, ignore
+    }
+  }
+
+  function loadCacheFromStorage() {
+    try {
+      if (storageArea()) {
+        storageGet(CACHE_STORAGE_KEY, function (result) {
           var stored = result && result[CACHE_STORAGE_KEY];
           if (stored && typeof stored === "object") {
             var now = Date.now();
@@ -40,11 +117,7 @@
           }
         });
 
-        chrome.storage.local.get(GEMINI_DEBUG_STORAGE_KEY, function (result) {
-          if (chrome.runtime.lastError) {
-            return;
-          }
-
+        storageGet(GEMINI_DEBUG_STORAGE_KEY, function (result) {
           var stored = result && result[GEMINI_DEBUG_STORAGE_KEY];
           if (Array.isArray(stored)) {
             geminiDebugEvidence = stored.slice(-MAX_GEMINI_DEBUG_ENTRIES);
@@ -58,7 +131,7 @@
 
   function saveCacheToStorage() {
     try {
-      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      if (storageArea()) {
         // Evict old entries if cache is too large
         var keys = Object.keys(memoryCache);
         if (keys.length > MAX_CACHE_SIZE) {
@@ -75,7 +148,7 @@
 
         var obj = {};
         obj[CACHE_STORAGE_KEY] = memoryCache;
-        chrome.storage.local.set(obj);
+        storageSet(obj);
       }
     } catch (_e) {
       // Storage access error, ignore
@@ -84,10 +157,10 @@
 
   function saveGeminiDebugEvidenceToStorage() {
     try {
-      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      if (storageArea()) {
         var obj = {};
         obj[GEMINI_DEBUG_STORAGE_KEY] = geminiDebugEvidence.slice(-MAX_GEMINI_DEBUG_ENTRIES);
-        chrome.storage.local.set(obj);
+        storageSet(obj);
       }
     } catch (_e) {
       // Storage access error, ignore

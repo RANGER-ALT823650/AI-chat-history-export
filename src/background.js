@@ -1,11 +1,12 @@
 (function () {
   "use strict";
 
-  const EXPORT_SETTINGS_KEY = "aiChatExporterSettings";
-  const EXPORT_REGISTRY_KEY = "aiChatExporterExportRegistry";
-  const DEFAULT_DOWNLOAD_ROOT_LABEL = "浏览器默认下载目录";
-  const DEFAULT_EXPORT_ROOT_LABEL = DEFAULT_DOWNLOAD_ROOT_LABEL;
-  const DOWNLOAD_PLATFORM_FOLDERS = ["ChatGPT", "Claude", "Gemini", "Grok", "DeepSeek", "Doubao", "Qwen", "AI"];
+  const extensionApi = globalThis.chrome || globalThis.browser;
+  if (!extensionApi) {
+    throw new Error("Browser extension API is not available.");
+  }
+  const chrome = extensionApi;
+  const EXPORTED_MARKDOWN_ROOT = "/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History";
   const PACKAGED_EXPORTED_INDEX_PATH = "src/exported-markdown-index.json";
 
   function toBase64Utf8(value) {
@@ -34,66 +35,16 @@
   }
 
   function downloadFilenamePath(folder, filename) {
+    const root = normalizePath(EXPORTED_MARKDOWN_ROOT);
     let cleanFolder = normalizePath(folder || "");
     const cleanFilename = stripUnsafePathSegments(filename || "AI_Chat.md").split("/").pop() || "AI_Chat.md";
 
-    const marker = "/AI Chat History/";
-    const markerIndex = cleanFolder.indexOf(marker);
-    if (markerIndex >= 0) {
-      cleanFolder = cleanFolder.slice(markerIndex + marker.length);
-    } else if (/^(?:\/|[A-Za-z]:\/)/.test(cleanFolder)) {
-      cleanFolder = cleanFolder.split("/").filter(Boolean).slice(-1).join("/");
+    if (cleanFolder === root || cleanFolder.startsWith(`${root}/`)) {
+      cleanFolder = cleanFolder.slice(root.length).replace(/^\/+/, "");
     }
 
     cleanFolder = stripUnsafePathSegments(cleanFolder);
     return cleanFolder ? `${cleanFolder}/${cleanFilename}` : cleanFilename;
-  }
-
-  function relativePathFromDownloadRoot(filename, rootName) {
-    const normalized = normalizePath(filename);
-    const cleanRoot = stripUnsafePathSegments(rootName || "");
-    if (!normalized || !cleanRoot) {
-      return "";
-    }
-
-    const parts = normalized.split("/").filter(Boolean);
-    const rootParts = cleanRoot.split("/").filter(Boolean);
-    if (!parts.length || !rootParts.length || parts.length < rootParts.length) {
-      return "";
-    }
-
-    for (let index = parts.length - rootParts.length; index >= 0; index -= 1) {
-      const candidate = parts.slice(index, index + rootParts.length).join("/");
-      if (candidate === cleanRoot) {
-        return parts.slice(index + rootParts.length).join("/");
-      }
-    }
-
-    if (normalized.startsWith(`${cleanRoot}/`)) {
-      return normalized.slice(cleanRoot.length).replace(/^\/+/, "");
-    }
-
-    return "";
-  }
-
-  function relativePathFromPlatformFolder(filename) {
-    const parts = normalizePath(filename).split("/").filter(Boolean);
-    if (parts.length < 2) {
-      return "";
-    }
-
-    const platformFolders = new Set(DOWNLOAD_PLATFORM_FOLDERS);
-    for (let index = parts.length - 2; index >= 0; index -= 1) {
-      if (platformFolders.has(parts[index])) {
-        return parts.slice(index).join("/");
-      }
-    }
-
-    return "";
-  }
-
-  function basenameFromPath(value, fallback = "AI_Chat.md") {
-    return normalizePath(value).split("/").filter(Boolean).pop() || fallback;
   }
 
   function escapeRegExp(value) {
@@ -221,32 +172,251 @@
     return parseMarkdownMetadata(markdown);
   }
 
-  function searchDownloads(query) {
+  function runtimeLastError() {
+    return chrome.runtime && chrome.runtime.lastError ? chrome.runtime.lastError : null;
+  }
+
+  function extensionApiError(error, fallbackMessage = "Browser extension API call failed.") {
+    if (error instanceof Error) {
+      return error;
+    }
+
+    const message = error && error.message ? error.message : String(error || fallbackMessage);
+    return new Error(message);
+  }
+
+  function callbackUnsupported(error) {
+    const message = error && error.message ? error.message : String(error || "");
+    return /callback|argument|too many|does not accept/i.test(message);
+  }
+
+  function nativeMessagingAvailable() {
+    return Boolean(chrome.runtime && chrome.runtime.sendNativeMessage);
+  }
+
+  function sendNativeMessage(message) {
+    if (!nativeMessagingAvailable()) {
+      return Promise.reject(new Error("This browser does not support native messaging."));
+    }
+
     return new Promise((resolve, reject) => {
-      chrome.downloads.search(query, (items) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          reject(new Error(error.message));
+      let settled = false;
+      const settle = (handler, value) => {
+        if (settled) {
           return;
         }
 
-        resolve(items || []);
-      });
+        settled = true;
+        handler(value);
+      };
+      const callback = (response) => {
+        const error = runtimeLastError();
+        if (error) {
+          settle(reject, extensionApiError(error));
+          return;
+        }
+
+        settle(resolve, response || {});
+      };
+      const retryWithoutCallback = (originalError) => {
+        try {
+          Promise.resolve(chrome.runtime.sendNativeMessage(message))
+            .then((response) => settle(resolve, response || {}), (error) => settle(reject, extensionApiError(error || originalError)));
+        } catch (promiseError) {
+          settle(reject, extensionApiError(promiseError || originalError));
+        }
+      };
+
+      try {
+        const maybePromise = chrome.runtime.sendNativeMessage(message, callback);
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(
+            (response) => settle(resolve, response || {}),
+            (error) => {
+              if (callbackUnsupported(error)) {
+                retryWithoutCallback(error);
+                return;
+              }
+
+              settle(reject, extensionApiError(error));
+            }
+          );
+        }
+      } catch (callbackError) {
+        retryWithoutCallback(callbackError);
+      }
     });
   }
 
-  function exportedMarkdownFile(downloadItem, root) {
+  function searchDownloads(query) {
+    if (!chrome.downloads || !chrome.downloads.search) {
+      return Promise.resolve([]);
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (handler, value) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        handler(value);
+      };
+      const callback = (items) => {
+        const error = runtimeLastError();
+        if (error) {
+          settle(reject, extensionApiError(error));
+          return;
+        }
+
+        settle(resolve, items || []);
+      };
+      const retryWithoutCallback = (originalError) => {
+        try {
+          Promise.resolve(chrome.downloads.search(query))
+            .then((items) => settle(resolve, items || []), (error) => settle(reject, extensionApiError(error || originalError)));
+        } catch (promiseError) {
+          settle(reject, extensionApiError(promiseError || originalError));
+        }
+      };
+
+      try {
+        const maybePromise = chrome.downloads.search(query, callback);
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(
+            (items) => settle(resolve, items || []),
+            (error) => {
+              if (callbackUnsupported(error)) {
+                retryWithoutCallback(error);
+                return;
+              }
+
+              settle(reject, extensionApiError(error));
+            }
+          );
+        }
+      } catch (callbackError) {
+        retryWithoutCallback(callbackError);
+      }
+    });
+  }
+
+  function downloadWithOptions(options) {
+    if (!chrome.downloads || !chrome.downloads.download) {
+      return Promise.reject(new Error("This browser does not support the downloads API."));
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (handler, value) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        handler(value);
+      };
+      const callback = (downloadId) => {
+        const error = runtimeLastError();
+        if (error) {
+          settle(reject, extensionApiError(error));
+          return;
+        }
+
+        settle(resolve, downloadId);
+      };
+      const retryWithoutCallback = (originalError) => {
+        try {
+          Promise.resolve(chrome.downloads.download(options))
+            .then((downloadId) => settle(resolve, downloadId), (error) => settle(reject, extensionApiError(error || originalError)));
+        } catch (promiseError) {
+          settle(reject, extensionApiError(promiseError || originalError));
+        }
+      };
+
+      try {
+        const maybePromise = chrome.downloads.download(options, callback);
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(
+            (downloadId) => settle(resolve, downloadId),
+            (error) => {
+              if (callbackUnsupported(error)) {
+                retryWithoutCallback(error);
+                return;
+              }
+
+              settle(reject, extensionApiError(error));
+            }
+          );
+        }
+      } catch (callbackError) {
+        retryWithoutCallback(callbackError);
+      }
+    });
+  }
+
+  async function downloadMarkdownFile(options) {
+    try {
+      return await downloadWithOptions(options);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      if (Object.prototype.hasOwnProperty.call(options, "conflictAction") && /conflictAction|unsupported|unexpected|invalid/i.test(message)) {
+        const fallbackOptions = { ...options };
+        delete fallbackOptions.conflictAction;
+        return downloadWithOptions(fallbackOptions);
+      }
+
+      throw error;
+    }
+  }
+
+  async function saveWithNativeApp(message) {
+    const response = await sendNativeMessage({
+      type: "SAVE_MARKDOWN_FILE",
+      relativePath: message.relativePath,
+      textBase64: toBase64Utf8(message.text || ""),
+      mimeType: message.mimeType || "text/markdown",
+      conflictAction: message.conflictAction || "uniquify"
+    });
+
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Native Safari file save failed.");
+    }
+
+    return response;
+  }
+
+  async function downloadOrSaveText(options, nativeMessage) {
+    if (chrome.downloads && chrome.downloads.download) {
+      try {
+        return { downloadId: await downloadMarkdownFile(options) };
+      } catch (error) {
+        if (!nativeMessagingAvailable()) {
+          throw error;
+        }
+      }
+    }
+
+    const nativeResult = await saveWithNativeApp(nativeMessage);
+    return {
+      nativePath: nativeResult.path || "",
+      relativePath: nativeResult.relativePath || nativeMessage.relativePath
+    };
+  }
+
+  function exportedMarkdownFile(downloadItem) {
     const filename = normalizePath(downloadItem && downloadItem.filename);
-    const cleanRoot = normalizePath(root);
+    const root = normalizePath(EXPORTED_MARKDOWN_ROOT);
     if (!filename || !filename.toLowerCase().endsWith(".md")) {
       return null;
     }
 
-    if (!cleanRoot || filename === cleanRoot || !filename.startsWith(`${cleanRoot}/`)) {
+    if (filename !== root && !filename.startsWith(`${root}/`)) {
       return null;
     }
 
-    const relativePath = filename.slice(cleanRoot.length).replace(/^\/+/, "");
+    const relativePath = filename.slice(root.length).replace(/^\/+/, "");
     if (!relativePath) {
       return null;
     }
@@ -262,7 +432,7 @@
     };
   }
 
-  function exportedMarkdownSnapshotFile(file, root = DEFAULT_EXPORT_ROOT_LABEL) {
+  function exportedMarkdownSnapshotFile(file) {
     const relativePath = normalizePath(file && file.relativePath);
     const basename = normalizePath(file && file.basename);
     const platformFolder = normalizePath(file && file.platformFolder);
@@ -273,7 +443,7 @@
     const parts = relativePath.split("/").filter(Boolean);
     return {
       id: file.id || `snapshot:${relativePath}`,
-      filename: normalizePath(file.filename || `${root}/${relativePath}`),
+      filename: normalizePath(file.filename || `${EXPORTED_MARKDOWN_ROOT}/${relativePath}`),
       relativePath,
       basename: basename || parts[parts.length - 1] || relativePath,
       platformFolder: platformFolder || (parts.length > 1 ? parts[0] : ""),
@@ -301,93 +471,28 @@
 
       const payload = await response.json();
       return (payload.files || [])
-        .map((file) => exportedMarkdownSnapshotFile(file))
+        .map(exportedMarkdownSnapshotFile)
         .filter(Boolean);
     } catch (_error) {
       return [];
     }
   }
 
-  async function loadExportSettings() {
-    const stored = await chrome.storage.local.get(EXPORT_SETTINGS_KEY).catch(() => ({}));
-    const settings = stored && stored[EXPORT_SETTINGS_KEY] && typeof stored[EXPORT_SETTINGS_KEY] === "object"
-      ? stored[EXPORT_SETTINGS_KEY]
-      : {};
-    const mode = settings.exportMode || "downloads";
-    return {
-      mode,
-      root: mode === "file-system-access"
-        ? settings.exportRootLabel || settings.exportRootName || DEFAULT_EXPORT_ROOT_LABEL
-        : DEFAULT_DOWNLOAD_ROOT_LABEL
-    };
-  }
-
-  function registryFileFromRecord(record, root) {
-    const platform = stripUnsafePathSegments(record && record.platform || "AI") || "AI";
-    const basename = stripUnsafePathSegments(record && record.filename || "AI_Chat.md").split("/").pop() || "AI_Chat.md";
-    const relativePath = normalizePath((record && record.relativePath) || `${platform}/${basename}`);
-
-    return exportedMarkdownSnapshotFile({
-      id: `registry:${platform}:${(record && (record.conversationId || record.url || relativePath)) || relativePath}`,
-      filename: `${root}/${relativePath}`,
-      relativePath,
-      basename,
-      platformFolder: platform,
-      metadata: {
-        platform,
-        sourceUrl: (record && record.url) || "",
-        conversationId: (record && record.conversationId) || "",
-        title: (record && record.title) || "",
-        needsMedia: ""
-      }
-    }, root);
-  }
-
-  async function loadRegistryExportedMarkdownFiles(root) {
-    const stored = await chrome.storage.local.get(EXPORT_REGISTRY_KEY).catch(() => ({}));
-    const registry = stored && stored[EXPORT_REGISTRY_KEY];
-    const items = registry && registry.items && typeof registry.items === "object"
-      ? Object.values(registry.items)
-      : [];
-
-    return items
-      .map((record) => registryFileFromRecord(record, root))
-      .filter(Boolean);
-  }
-
   async function listExportedMarkdownFiles() {
-    const settings = await loadExportSettings();
-    const root = normalizePath(settings.root || DEFAULT_EXPORT_ROOT_LABEL);
-    const rootPattern = settings.mode === "downloads"
-      ? `(?:^|[\\\\/])(?:${DOWNLOAD_PLATFORM_FOLDERS.map(escapeRegExp).join("|")})[\\\\/].*\\.md$`
-      : root && root !== DEFAULT_EXPORT_ROOT_LABEL
-        ? `^${escapeRegExp(root)}/.*\\.md$`
-        : "";
+    const rootPattern = `^${escapeRegExp(normalizePath(EXPORTED_MARKDOWN_ROOT))}/.*\\.md$`;
     let items;
 
     try {
-      items = rootPattern
-        ? await searchDownloads({ state: "complete", filenameRegex: rootPattern })
-        : [];
+      items = await searchDownloads({ state: "complete", filenameRegex: rootPattern });
     } catch (_error) {
-      items = [];
+      items = await searchDownloads({ state: "complete" });
     }
 
     const seen = new Set();
     const files = [];
     const snapshotFiles = await loadPackagedExportedMarkdownFiles();
-    const registryFiles = await loadRegistryExportedMarkdownFiles(root);
     const allItems = [
-      ...items.filter((item) => item && item.exists !== false).map((item) => settings.mode === "downloads"
-        ? exportedMarkdownSnapshotFile({
-          id: item.id,
-          filename: normalizePath(item.filename),
-          relativePath: relativePathFromPlatformFolder(item.filename),
-          basename: basenameFromPath(item.filename),
-          metadata: markdownMetadataFromDownload(item)
-        }, root)
-        : exportedMarkdownFile(item, root)),
-      ...registryFiles,
+      ...items.filter((item) => item && item.exists !== false).map(exportedMarkdownFile),
       ...snapshotFiles
     ].filter(Boolean);
 
@@ -403,11 +508,10 @@
 
     return {
       ok: true,
-      root,
+      root: EXPORTED_MARKDOWN_ROOT,
       files,
       sources: {
         downloads: items.length,
-        registry: registryFiles.length,
         snapshot: snapshotFiles.length
       }
     };
@@ -417,41 +521,27 @@
     const filename = message.filename || "AI_Chat.md";
     const body = message.markdown || message.text || "";
     const mimeType = message.mimeType || "text/markdown";
-    const folder = message.folder || "";
+    const folder = message.folder || EXPORTED_MARKDOWN_ROOT;
     const conflictAction = message.conflictAction || "uniquify";
     const url = `data:${mimeType};charset=utf-8;base64,${toBase64Utf8(body)}`;
     const targetPath = downloadFilenamePath(folder, filename);
-    const rootName = stripUnsafePathSegments(message.rootName || "");
 
-    chrome.downloads.download(
-      {
-        url,
-        filename: targetPath,
-        saveAs: false,
-        conflictAction: conflictAction
-      },
-      async (downloadId) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          sendResponse({ ok: false, error: error.message });
-          return;
-        }
-
-        const [downloadItem] = await searchDownloads({ id: downloadId }).catch(() => []);
-        const finalPath = normalizePath((downloadItem && downloadItem.filename) || targetPath);
-        const relativePath = rootName
-          ? relativePathFromDownloadRoot(finalPath, rootName) || relativePathFromDownloadRoot(targetPath, rootName)
-          : normalizePath(targetPath);
-
-        sendResponse({
-          ok: true,
-          downloadId,
-          filename: basenameFromPath(finalPath || targetPath, filename),
-          relativePath: relativePath || basenameFromPath(finalPath || targetPath, filename),
-          path: finalPath || targetPath
-        });
-      }
-    );
+    downloadOrSaveText({
+      url,
+      filename: targetPath,
+      saveAs: false,
+      conflictAction: conflictAction
+    }, {
+      relativePath: targetPath,
+      text: body,
+      mimeType,
+      conflictAction
+    })
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({
+        ok: false,
+        error: error && error.message ? error.message : String(error)
+      }));
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  const extensionApi = globalThis.chrome || globalThis.browser;
+  if (!extensionApi) {
+    throw new Error("Browser extension API is not available.");
+  }
+  const chrome = extensionApi;
   const CONTENT_FILES = [
     "src/content/platform-utils.js",
     "src/content/timestamp-cache.js",
@@ -12,7 +17,6 @@
     "src/content/adapters/grok.js",
     "src/content/adapters/deepseek.js",
     "src/content/adapters/doubao.js",
-    "src/content/adapters/qwen.js",
     "src/content/adapters/claude.js",
     "src/content/history-discovery.js",
     "src/content/content.js"
@@ -22,15 +26,11 @@
   ];
   const STORAGE_KEY = "aiChatExporterBatchState";
   const REGISTRY_KEY = "aiChatExporterExportRegistry";
-  const DEFAULT_EXPORT_ROOT_LABEL = "浏览器默认下载目录";
-  const exportPath = window.AIChatExporterExportPath;
+  const EXPORTED_MARKDOWN_ROOT = "/Users/mayifan/Library/Mobile Documents/iCloud~md~obsidian/Documents/同步/10_Raw/AI Chat History";
   const params = new URLSearchParams(window.location.search);
   const sourceTabId = Number(params.get("sourceTabId"));
 
   const sourceElement = document.getElementById("source");
-  const exportPathElement = document.getElementById("exportPath");
-  const choosePathButton = document.getElementById("choosePathButton");
-  const defaultPathButton = document.getElementById("defaultPathButton");
   const statusElement = document.getElementById("status");
   const discoverButton = document.getElementById("discoverButton");
   const exportButton = document.getElementById("exportButton");
@@ -58,20 +58,18 @@
     items: {}
   };
   let exportedFileIndex = {
-    root: DEFAULT_EXPORT_ROOT_LABEL,
+    root: EXPORTED_MARKDOWN_ROOT,
     files: [],
     identityKeys: new Set(),
     sourceUrlKeys: new Set(),
     filenameKeys: new Set(),
     sources: {
       downloads: 0,
-      registry: 0,
       snapshot: 0
     }
   };
   let cancelRequested = false;
   let running = false;
-  let exportDirectoryReady = false;
 
   function setStatus(value) {
     statusElement.textContent = value;
@@ -228,18 +226,6 @@
       if (hostname === "doubao.com" || hostname.endsWith(".doubao.com")) {
         return "Doubao";
       }
-      if (
-        hostname === "qwen.ai" ||
-        hostname.endsWith(".qwen.ai") ||
-        hostname === "qwenlm.ai" ||
-        hostname.endsWith(".qwenlm.ai") ||
-        hostname === "qianwen.com" ||
-        hostname.endsWith(".qianwen.com") ||
-        hostname === "tongyi.aliyun.com" ||
-        hostname === "qianwen.aliyun.com"
-      ) {
-        return "Qwen";
-      }
     } catch (_error) {
       // Keep the caller-provided platform fallback.
     }
@@ -269,7 +255,7 @@
     return metadata.platform || file.platformFolder || platformLabelFromUrl(metadata.sourceUrl || "");
   }
 
-  function buildExportedFileIndex(files, root = DEFAULT_EXPORT_ROOT_LABEL, sources = {}) {
+  function buildExportedFileIndex(files, root = EXPORTED_MARKDOWN_ROOT, sources = {}) {
     const identityKeys = new Set();
     const sourceUrlKeys = new Set();
     const filenameKeys = new Set();
@@ -299,7 +285,6 @@
       filenameKeys,
       sources: {
         downloads: sources.downloads || 0,
-        registry: sources.registry || 0,
         snapshot: sources.snapshot || 0
       }
     };
@@ -311,42 +296,8 @@
       throw new Error((response && response.error) || "无法读取已导出的文件记录。");
     }
 
-    exportedFileIndex = buildExportedFileIndex(response.files || [], response.root || DEFAULT_EXPORT_ROOT_LABEL, response.sources || {});
+    exportedFileIndex = buildExportedFileIndex(response.files || [], response.root || EXPORTED_MARKDOWN_ROOT, response.sources || {});
     return exportedFileIndex;
-  }
-
-  async function refreshExportPathStatus() {
-    if (!exportPath || !exportPath.isSupported()) {
-      exportPathElement.textContent = "导出目录：当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。";
-      choosePathButton.disabled = true;
-      defaultPathButton.disabled = true;
-      return false;
-    }
-
-    const label = await exportPath.exportRootLabel();
-    const hasDirectory = await exportPath.hasExportDirectory();
-    exportDirectoryReady = hasDirectory;
-    exportPathElement.textContent = hasDirectory
-      ? `导出目录：${label}`
-      : `导出目录：${label}（自定义目录权限不可用，请重新选择）`;
-    choosePathButton.disabled = !exportPath.canPickExportDirectory || !exportPath.canPickExportDirectory();
-    defaultPathButton.disabled = false;
-    return hasDirectory;
-  }
-
-  async function ensureExportDirectory(options = {}) {
-    if (!exportPath || !exportPath.isSupported()) {
-      throw new Error("当前浏览器不支持自动下载，请使用新版 Chrome 或 Edge。");
-    }
-
-    const ready = options.requestPermission === false
-      ? await exportPath.hasExportDirectory()
-      : await exportPath.requestExportDirectoryAccess();
-    if (!ready) {
-      exportDirectoryReady = false;
-      await refreshExportPathStatus();
-      throw new Error("导出目录权限未授权，请点击“自定义导出目录”重新选择或改用默认下载目录。");
-    }
   }
 
   function candidateExportKeys(item, platformFallback = "") {
@@ -573,7 +524,7 @@
       target: { tabId },
       files: CONTENT_FILES
     });
-    
+
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -618,7 +569,7 @@
 
   async function getSourceTab() {
     if (!sourceTabId) {
-      throw new Error("缺少来源标签页。请从 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问页面重新打开批量导出。");
+      throw new Error("缺少来源标签页。请从 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包页面重新打开批量导出。");
     }
 
     const tab = await chrome.tabs.get(sourceTabId).catch(() => null);
@@ -723,7 +674,6 @@
     render();
 
     try {
-      await ensureExportDirectory();
       const tab = await getSourceTab();
       await loadRegistry();
       await loadExportedFileIndex();
@@ -754,7 +704,7 @@
         const updateCheckInfo = summary.queuedForUpdateCheck > 0
           ? `，其中 ${summary.queuedForUpdateCheck} 条将检查是否有新消息`
           : '';
-        setStatus(`扫描完成，发现 ${summary.discovered} 条聊天；已读取 ${exportedFileIndex.files.length} 个已导出文件（下载记录 ${exportedFileIndex.sources.downloads}，导出记录 ${exportedFileIndex.sources.registry}，本地快照 ${exportedFileIndex.sources.snapshot}），按 ${exportedFileIndex.root} 去重 ${summary.skippedExistingFiles} 条${updateCheckInfo}，本轮待导出 ${summary.queued} 条。`);
+        setStatus(`扫描完成，发现 ${summary.discovered} 条聊天；已读取 ${exportedFileIndex.files.length} 个已导出文件（下载记录 ${exportedFileIndex.sources.downloads}，本地快照 ${exportedFileIndex.sources.snapshot}），按 ${exportedFileIndex.root} 去重 ${summary.skippedExistingFiles} 条${updateCheckInfo}，本轮待导出 ${summary.queued} 条。`);
       }
     } catch (error) {
       setStatus(error && error.message ? error.message : String(error));
@@ -829,24 +779,19 @@
   }
 
   async function downloadMarkdown(result, platform, overwrite = false) {
-    await ensureExportDirectory({ requestPermission: false });
-    const written = await exportPath.writeMarkdownFile({
-      platform: platform || result.platform || "AI",
+    const download = await chrome.runtime.sendMessage({
+      type: "DOWNLOAD_MARKDOWN",
       filename: result.filename,
       markdown: result.markdown,
-      conflictAction: overwrite ? "overwrite" : "uniquify",
-      title: result.title || "",
-      sourceUrl: result.sourceUrl || "",
-      conversationId: result.conversationId || "",
-      conversationTime: result.conversationTime || "",
-      messageCount: result.messageCount || 0
+      folder: `${EXPORTED_MARKDOWN_ROOT}/${platform || result.platform || "AI"}`,
+      conflictAction: overwrite ? "overwrite" : "uniquify"
     });
 
-    if (!written || !written.ok) {
-      throw new Error((written && written.error) || "写入 Markdown 失败。");
+    if (!download || !download.ok) {
+      throw new Error((download && download.error) || "下载失败。");
     }
 
-    return written;
+    return download;
   }
 
   async function markExported(item, result) {
@@ -966,7 +911,6 @@
     let workTabId = null;
 
     try {
-      await ensureExportDirectory();
       await loadRegistry();
       await loadExportedFileIndex();
       discoverButton.disabled = true;
@@ -1062,7 +1006,7 @@
       return;
     }
 
-    if (!window.confirm("确定清空兼容记录并允许当前队列全部重新导出吗？已存在的导出文件不会被删除，重新导出时可能生成带序号的新文件。")) {
+    if (!window.confirm("确定清空兼容记录并允许当前队列全部重新导出吗？已存在的导出文件不会被删除，重新下载时浏览器可能生成带序号的新文件。")) {
       return;
     }
 
@@ -1077,7 +1021,7 @@
     }));
     state.forceReexportExistingFiles = true;
     await saveState();
-    setStatus("已清空兼容记录。当前队列已全部改为待导出，下一次开始导出会重新写入所有聊天。");
+    setStatus("已清空兼容记录。当前队列已全部改为待导出，下一次开始导出会重新下载所有聊天。");
     render();
   }
 
@@ -1102,43 +1046,10 @@
     clearRegistry();
   });
 
-  choosePathButton.addEventListener("click", async () => {
-    choosePathButton.disabled = true;
-    setStatus("请选择 Markdown 导出目录...");
-
-    try {
-      await exportPath.pickExportDirectory();
-      await refreshExportPathStatus();
-      await loadExportedFileIndex().catch(() => null);
-      setStatus("导出目录已保存。");
-    } catch (error) {
-      setStatus(error && error.message ? error.message : String(error));
-    } finally {
-      choosePathButton.disabled = false;
-    }
-  });
-
-  defaultPathButton.addEventListener("click", async () => {
-    defaultPathButton.disabled = true;
-    setStatus("正在切换到浏览器默认下载目录...");
-
-    try {
-      await exportPath.useDefaultDownloadDirectory();
-      await refreshExportPathStatus();
-      await loadExportedFileIndex().catch(() => null);
-      setStatus("已切换为浏览器默认下载目录。");
-    } catch (error) {
-      setStatus(error && error.message ? error.message : String(error));
-    } finally {
-      defaultPathButton.disabled = false;
-    }
-  });
-
   async function initialize() {
     await loadState();
     await loadRegistry();
     await migrateSucceededStateToRegistry();
-    await refreshExportPathStatus();
     const tab = await getSourceTab();
     sourceElement.textContent = tab.url;
     state.sourceUrl = state.sourceUrl || tab.url;

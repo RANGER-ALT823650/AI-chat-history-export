@@ -6,6 +6,11 @@
   }
   global.__AI_CHAT_EXPORTER_CONTENT_LOADED__ = true;
 
+  const extensionApi = global.chrome || global.browser;
+  if (!extensionApi || !extensionApi.runtime || !extensionApi.runtime.onMessage) {
+    return;
+  }
+  const chrome = extensionApi;
   const namespace = (global.AIChatExporter = global.AIChatExporter || {});
   const utils = namespace.PlatformUtils;
   const markdown = namespace.Markdown;
@@ -22,8 +27,7 @@
       gemini: namespace.GeminiAdapter,
       grok: namespace.GrokAdapter,
       deepseek: namespace.DeepSeekAdapter,
-      doubao: namespace.DoubaoAdapter,
-      qwen: namespace.QwenAdapter
+      doubao: namespace.DoubaoAdapter
     };
 
     return { platform, adapter: adapters[platform.id] || null };
@@ -113,7 +117,7 @@
     if (!platform || !adapter) {
       return {
         ok: false,
-        error: "当前页面不是已支持的 ChatGPT、Claude、Gemini、Grok、DeepSeek、豆包或千问聊天页。"
+        error: "当前页面不是已支持的 ChatGPT、Claude、Gemini、Grok、DeepSeek 或豆包聊天页。"
       };
     }
 
